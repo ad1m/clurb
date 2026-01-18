@@ -29,6 +29,8 @@ export function LibraryHeader({ profile, onUploadComplete }: LibraryHeaderProps)
   const { theme, setTheme } = useTheme()
   const router = useRouter()
   const [invitationCount, setInvitationCount] = useState(0)
+  const [friendRequestCount, setFriendRequestCount] = useState(0)
+  const supabase = createClient()
 
   useEffect(() => {
     const fetchInvitationCount = async () => {
@@ -47,6 +49,28 @@ export function LibraryHeader({ profile, onUploadComplete }: LibraryHeaderProps)
     const interval = setInterval(fetchInvitationCount, 30000) // Poll every 30 seconds
     return () => clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    const fetchFriendRequestCount = async () => {
+      if (!profile) return
+
+      try {
+        const { data } = await supabase
+          .from("friendships")
+          .select("id")
+          .eq("friend_id", profile.id)
+          .eq("status", "pending")
+
+        setFriendRequestCount(data?.length || 0)
+      } catch (error) {
+        console.error("[v0] Failed to fetch friend request count:", error)
+      }
+    }
+
+    fetchFriendRequestCount()
+    const interval = setInterval(fetchFriendRequestCount, 30000) // Poll every 30 seconds
+    return () => clearInterval(interval)
+  }, [profile, supabase])
 
   const handleSignOut = async () => {
     const supabase = createClient()
@@ -81,8 +105,13 @@ export function LibraryHeader({ profile, onUploadComplete }: LibraryHeaderProps)
               </Button>
             </Link>
             <Link href="/friends">
-              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground relative">
                 Friends
+                {friendRequestCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-primary text-primary-foreground text-xs font-medium rounded-full flex items-center justify-center">
+                    {friendRequestCount}
+                  </span>
+                )}
               </Button>
             </Link>
             <Link href="/agent">

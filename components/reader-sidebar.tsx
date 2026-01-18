@@ -5,17 +5,16 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import { Users, UserPlus, BookOpen } from "lucide-react"
+import { Users, BookOpen } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 
 interface ReaderSidebarProps {
   file: File
   members: (FileMember & { user?: Profile; progress?: ReadingProgress })[]
   currentUserId: string
-  onInviteFriend: () => void
 }
 
-export function ReaderSidebar({ file, members, currentUserId, onInviteFriend }: ReaderSidebarProps) {
+export function ReaderSidebar({ file, members, currentUserId }: ReaderSidebarProps) {
   return (
     <div className="w-72 border-l border-border bg-card flex flex-col h-full">
       {/* File Info */}
@@ -32,14 +31,11 @@ export function ReaderSidebar({ file, members, currentUserId, onInviteFriend }: 
 
       {/* Members Section */}
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="px-4 py-3 flex items-center justify-between">
+        <div className="px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Users className="w-4 h-4" />
             Reading Together ({members.length})
           </div>
-          <Button variant="ghost" size="icon" className="w-7 h-7" onClick={onInviteFriend}>
-            <UserPlus className="w-4 h-4" />
-          </Button>
         </div>
 
         <ScrollArea className="flex-1">

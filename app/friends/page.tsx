@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Search, UserPlus, Check, X, Loader2, Users, UserCheck, Clock } from "lucide-react"
+import { Search, UserPlus, Check, X, Loader2, Users, UserCheck, Clock, Trash2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 export default function FriendsPage() {
@@ -175,6 +175,25 @@ export default function FriendsPage() {
     }
   }
 
+  const handleRemoveFriend = async (friendshipId: string) => {
+    setActionLoading(friendshipId)
+    try {
+      const { error } = await supabase.from("friendships").delete().eq("id", friendshipId)
+
+      if (error) throw error
+
+      toast({ title: "Friend removed" })
+      fetchData()
+    } catch {
+      toast({
+        title: "Failed to remove friend",
+        variant: "destructive",
+      })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const getInitials = (p: Profile | undefined) =>
     p?.display_name
       ?.split(" ")
@@ -325,6 +344,19 @@ export default function FriendsPage() {
                               <p className="text-sm text-muted-foreground">@{friend?.username}</p>
                             </div>
                           </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleRemoveFriend(friendship.id)}
+                            disabled={actionLoading === friendship.id}
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          >
+                            {actionLoading === friendship.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </Button>
                         </CardContent>
                       </Card>
                     )

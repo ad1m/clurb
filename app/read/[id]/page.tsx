@@ -9,7 +9,6 @@ import { PDFViewer } from "@/components/pdf-viewer"
 import { StickyNote } from "@/components/sticky-note"
 import { StickyNoteCreator } from "@/components/sticky-note-creator"
 import { ReaderSidebar } from "@/components/reader-sidebar"
-import { InviteFriendDialog } from "@/components/invite-friend-dialog"
 import { ChatPanel } from "@/components/chat-panel"
 import { AIHighlightPopup } from "@/components/ai-highlight-popup"
 import { Button } from "@/components/ui/button"
@@ -30,7 +29,6 @@ export default function ReadPage({ params }: PageProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [isCreatingNote, setIsCreatingNote] = useState(false)
   const [showSidebar, setShowSidebar] = useState(true)
-  const [showInviteDialog, setShowInviteDialog] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [selectedText, setSelectedText] = useState<string | null>(null)
   const [highlightPosition, setHighlightPosition] = useState({ x: 0, y: 0 })
@@ -318,19 +316,9 @@ export default function ReadPage({ params }: PageProps) {
             file={file}
             members={members}
             currentUserId={currentUserId || ""}
-            onInviteFriend={() => setShowInviteDialog(true)}
           />
         )}
       </div>
-
-      {/* Invite Friend Dialog */}
-      <InviteFriendDialog
-        open={showInviteDialog}
-        onOpenChange={setShowInviteDialog}
-        fileId={fileId}
-        existingMemberIds={members.map((m) => m.user_id)}
-        onInviteComplete={fetchData}
-      />
 
       {currentUserId && (
         <ChatPanel fileId={fileId} currentUserId={currentUserId} isOpen={showChat} onClose={() => setShowChat(false)} />
