@@ -25,7 +25,7 @@ export async function PATCH(
       .from("file_invitations")
       .select("*")
       .eq("id", invitationId)
-      .eq("invitee_id", user.id)
+      .eq("to_user_id", user.id)
       .single()
 
     if (inviteError || !invitation) {
