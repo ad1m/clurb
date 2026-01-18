@@ -30,7 +30,7 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
       const { pdfjs } = await import("react-pdf")
       
       // Set up worker if not already set
-      if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
+      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
         pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
       }
       

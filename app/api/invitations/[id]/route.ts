@@ -20,6 +20,8 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid action" }, { status: 400 })
     }
 
+    console.log(`[v0] Processing invitation ${invitationId} action: ${action} for user: ${user.id}`)
+
     // Get invitation
     const { data: invitation, error: inviteError } = await supabase
       .from("file_invitations")
@@ -28,9 +30,17 @@ export async function PATCH(
       .eq("to_user_id", user.id)
       .single()
 
-    if (inviteError || !invitation) {
+    if (inviteError) {
+      console.error("[v0] Error fetching invitation:", inviteError)
       return NextResponse.json({ error: "Invitation not found" }, { status: 404 })
     }
+
+    if (!invitation) {
+      console.error("[v0] Invitation not found or user not recipient")
+      return NextResponse.json({ error: "Invitation not found" }, { status: 404 })
+    }
+
+    console.log("[v0] Found invitation:", invitation)
 
     if (invitation.status !== "pending") {
       return NextResponse.json({ error: "Invitation already responded to" }, { status: 400 })
@@ -39,26 +49,48 @@ export async function PATCH(
     // Update invitation status
     const { error: updateError } = await supabase
       .from("file_invitations")
-      .update({ status: action === "accept" ? "accepted" : "declined" })
+      .update({ 
+        status: action === "accept" ? "accepted" : "declined",
+        responded_at: new Date().toISOString()
+      })
       .eq("id", invitationId)
 
-    if (updateError) throw updateError
+    if (updateError) {
+      console.error("[v0] Error updating invitation:", updateError)
+      throw updateError
+    }
+
+    console.log("[v0] Updated invitation status")
 
     // If accepted, add user as file member
     if (action === "accept") {
-      const { error: memberError } = await supabase
+      console.log("[v0] Adding user to file_members")
+      
+      // First check if user is already a member
+      const { data: existingMember } = await supabase
         .from("file_members")
-        .insert({
-          file_id: invitation.file_id,
-          user_id: user.id,
-          role: "viewer",
-        })
+        .select("id")
+        .eq("file_id", invitation.file_id)
+        .eq("user_id", user.id)
+        .single()
 
-      if (memberError) {
-        // If already a member, that's ok
-        if (!memberError.message.includes("duplicate")) {
+      if (existingMember) {
+        console.log("[v0] User already a member")
+      } else {
+        const { error: memberError } = await supabase
+          .from("file_members")
+          .insert({
+            file_id: invitation.file_id,
+            user_id: user.id,
+            role: "viewer",
+          })
+
+        if (memberError) {
+          console.error("[v0] Error adding to file_members:", memberError)
           throw memberError
         }
+
+        console.log("[v0] Added user to file_members")
       }
 
       // Log activity
@@ -67,6 +99,8 @@ export async function PATCH(
         file_id: invitation.file_id,
         action_type: "file_joined",
       })
+
+      console.log("[v0] Logged activity")
     }
 
     return NextResponse.json({ 
