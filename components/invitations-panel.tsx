@@ -14,12 +14,12 @@ interface Invitation {
     id: string
     title: string
     cover_image_url: string | null
-  }
+  } | null
   inviter: {
     id: string
     username: string
     display_name: string | null
-  }
+  } | null
 }
 
 export function InvitationsPanel() {
@@ -33,7 +33,11 @@ export function InvitationsPanel() {
       const response = await fetch("/api/invitations")
       if (!response.ok) throw new Error("Failed to fetch invitations")
       const data = await response.json()
-      setInvitations(data.invitations || [])
+      // Filter out invitations where file or inviter is null (deleted files/users)
+      const validInvitations = (data.invitations || []).filter(
+        (inv: Invitation) => inv.file && inv.inviter
+      )
+      setInvitations(validInvitations)
     } catch (error) {
       console.error("[v0] Fetch invitations error:", error)
     } finally {
@@ -64,8 +68,16 @@ export function InvitationsPanel() {
         description: data.message,
       })
 
-      // Remove from list
+      // Remove from list and refresh to update count
       setInvitations(prev => prev.filter(inv => inv.id !== invitationId))
+      
+      // Refresh the page to update library if accepted
+      if (action === "accept") {
+        // Delay slightly to allow database to update
+        setTimeout(() => {
+          window.location.reload()
+        }, 500)
+      }
     } catch (error) {
       toast({
         title: "Error",
@@ -98,18 +110,24 @@ export function InvitationsPanel() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 p-4">
       {invitations.map((invitation) => {
         const isProcessing = processingIds.has(invitation.id)
+        // These should always exist due to filtering, but add safety checks
+        const file = invitation.file
+        const inviter = invitation.inviter
+        
+        if (!file || !inviter) return null
+
         return (
           <Card key={invitation.id} className="p-4">
             <div className="flex gap-4">
               {/* File cover */}
               <div className="flex-shrink-0 w-12 h-16 rounded overflow-hidden bg-muted">
-                {invitation.file.cover_image_url ? (
+                {file.cover_image_url ? (
                   <img
-                    src={invitation.file.cover_image_url || "/placeholder.svg"}
-                    alt={invitation.file.title}
+                    src={file.cover_image_url}
+                    alt={file.title}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -121,9 +139,9 @@ export function InvitationsPanel() {
 
               {/* Content */}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{invitation.file.title}</p>
+                <p className="text-sm font-medium truncate">{file.title}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Shared by {invitation.inviter.display_name || invitation.inviter.username}
+                  Shared by {inviter.display_name || inviter.username}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {new Date(invitation.created_at).toLocaleDateString()}
@@ -138,6 +156,7 @@ export function InvitationsPanel() {
                   onClick={() => handleResponse(invitation.id, "accept")}
                   disabled={isProcessing}
                   className="h-8 w-8 p-0"
+                  title="Accept invitation"
                 >
                   {isProcessing ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -151,6 +170,7 @@ export function InvitationsPanel() {
                   onClick={() => handleResponse(invitation.id, "decline")}
                   disabled={isProcessing}
                   className="h-8 w-8 p-0"
+                  title="Decline invitation"
                 >
                   <X className="w-4 h-4" />
                 </Button>
