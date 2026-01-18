@@ -8,7 +8,6 @@ import type { ChatMessage, Profile } from "@/lib/types"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, X, Loader2 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { cn } from "@/lib/utils"
@@ -25,13 +24,11 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
   const [newMessage, setNewMessage] = useState("")
   const [isSending, setIsSending] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
   const scrollToBottom = useCallback(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [])
 
   const fetchMessages = useCallback(async () => {
@@ -117,9 +114,9 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
   if (!isOpen) return null
 
   return (
-    <div className="fixed bottom-0 right-4 w-80 h-96 bg-card border border-border rounded-t-xl shadow-xl flex flex-col z-50">
+    <div className="fixed bottom-0 right-4 w-80 h-[500px] bg-card border border-border rounded-t-xl shadow-xl flex flex-col z-50">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <h3 className="font-semibold text-sm">Book Chat</h3>
         <Button variant="ghost" size="icon" className="w-7 h-7" onClick={onClose}>
           <X className="w-4 h-4" />
@@ -127,7 +124,7 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+      <div className="flex-1 overflow-y-auto p-4 min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -159,7 +156,7 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
                   <div className={cn("max-w-[200px]", isOwn && "text-right")}>
                     <div
                       className={cn(
-                        "rounded-2xl px-3 py-2 text-sm",
+                        "rounded-2xl px-3 py-2 text-sm break-words",
                         isOwn ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted rounded-tl-sm",
                       )}
                     >
@@ -172,12 +169,13 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
                 </div>
               )
             })}
+            <div ref={messagesEndRef} />
           </div>
         )}
-      </ScrollArea>
+      </div>
 
       {/* Input */}
-      <form onSubmit={handleSend} className="p-3 border-t border-border">
+      <form onSubmit={handleSend} className="p-3 border-t border-border shrink-0">
         <div className="flex gap-2">
           <Input
             value={newMessage}

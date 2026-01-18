@@ -30,6 +30,7 @@ export default function ReadPage({ params }: PageProps) {
   const [isCreatingNote, setIsCreatingNote] = useState(false)
   const [showSidebar, setShowSidebar] = useState(true)
   const [showChat, setShowChat] = useState(false)
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([])
   const [selectedText, setSelectedText] = useState<string | null>(null)
   const [highlightPosition, setHighlightPosition] = useState({ x: 0, y: 0 })
   const router = useRouter()
@@ -119,7 +120,37 @@ export default function ReadPage({ params }: PageProps) {
 
   useEffect(() => {
     fetchData()
-  }, [fetchData])
+    
+    // Set up presence tracking
+    if (currentUserId && fileId) {
+      const presenceChannel = supabase.channel(`presence:file:${fileId}`, {
+        config: {
+          presence: {
+            key: currentUserId,
+          },
+        },
+      })
+
+      presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          const state = presenceChannel.presenceState()
+          const userIds = Object.keys(state)
+          setOnlineUsers(userIds)
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await presenceChannel.track({
+              user_id: currentUserId,
+              online_at: new Date().toISOString(),
+            })
+          }
+        })
+
+      return () => {
+        presenceChannel.unsubscribe()
+      }
+    }
+  }, [fetchData, currentUserId, fileId, supabase])
 
   useEffect(() => {
     if (currentUserId) {
@@ -316,6 +347,7 @@ export default function ReadPage({ params }: PageProps) {
             file={file}
             members={members}
             currentUserId={currentUserId || ""}
+            onlineUserIds={onlineUsers}
           />
         )}
       </div>

@@ -12,9 +12,10 @@ interface ReaderSidebarProps {
   file: File
   members: (FileMember & { user?: Profile; progress?: ReadingProgress })[]
   currentUserId: string
+  onlineUserIds?: string[]
 }
 
-export function ReaderSidebar({ file, members, currentUserId }: ReaderSidebarProps) {
+export function ReaderSidebar({ file, members, currentUserId, onlineUserIds = [] }: ReaderSidebarProps) {
   return (
     <div className="w-72 border-l border-border bg-card flex flex-col h-full">
       {/* File Info */}
@@ -36,6 +37,9 @@ export function ReaderSidebar({ file, members, currentUserId }: ReaderSidebarPro
             <Users className="w-4 h-4" />
             Reading Together ({members.length})
           </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {onlineUserIds.length} online now
+          </p>
         </div>
 
         <ScrollArea className="flex-1">
@@ -51,6 +55,8 @@ export function ReaderSidebar({ file, members, currentUserId }: ReaderSidebarPro
                 member.user?.username?.[0]?.toUpperCase() ||
                 "?"
 
+              const isOnline = onlineUserIds.includes(member.user_id)
+              
               return (
                 <div key={member.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition">
                   <div className="relative">
@@ -58,7 +64,9 @@ export function ReaderSidebar({ file, members, currentUserId }: ReaderSidebarPro
                       <AvatarImage src={member.user?.avatar_url || undefined} />
                       <AvatarFallback className="text-xs bg-primary/10 text-primary">{initials}</AvatarFallback>
                     </Avatar>
-                    {/* Online indicator could go here */}
+                    {isOnline && (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-card" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">

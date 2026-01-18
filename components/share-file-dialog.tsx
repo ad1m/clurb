@@ -10,8 +10,6 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Share2, Search, Loader2, UserPlus } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
@@ -29,7 +27,6 @@ export function ShareFileDialog({ fileId, fileName, open, onOpenChange }: ShareF
   const [friends, setFriends] = useState<Profile[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedFriend, setSelectedFriend] = useState<Profile | null>(null)
-  const [message, setMessage] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const { toast } = useToast()
@@ -79,27 +76,31 @@ export function ShareFileDialog({ fileId, fileName, open, onOpenChange }: ShareF
 
     setIsSending(true)
     try {
-      // Add friend directly to file_members
-      const { error } = await supabase.from("file_members").insert({
-        file_id: fileId,
-        user_id: selectedFriend.id,
-        role: "viewer",
+      // Send invitation via API (which will create file_invitation)
+      const response = await fetch("/api/invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileId,
+          friendId: selectedFriend.id,
+        }),
       })
 
-      if (error) throw error
+      const data = await response.json()
+
+      if (!response.ok) throw new Error(data.error || "Failed to send invitation")
 
       toast({
-        title: "Friend invited",
-        description: `${selectedFriend.display_name || selectedFriend.username} can now access "${fileName}"`,
+        title: "Invitation sent",
+        description: `${selectedFriend.display_name || selectedFriend.username} will be notified to accept your file invitation`,
       })
 
       onOpenChange(false)
       setSelectedFriend(null)
-      setMessage("")
     } catch (error) {
       console.error("[v0] Error sending invitation:", error)
       toast({
-        title: "Failed to invite friend",
+        title: "Failed to send invitation",
         description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       })
@@ -143,7 +144,7 @@ export function ShareFileDialog({ fileId, fileName, open, onOpenChange }: ShareF
               <div className="text-center py-8 text-muted-foreground">
                 <UserPlus className="w-8 h-8 mx-auto mb-2 opacity-50" />
                 <p className="text-sm">
-                  {friends.length === 0 ? "You don't have any friends yet" : "No friends found"}
+                  {friends.length === 0 ? "You don\'t have any friends yet" : "No friends found"}
                 </p>
                 {friends.length === 0 && (
                   <p className="text-xs mt-2">
@@ -198,12 +199,12 @@ export function ShareFileDialog({ fileId, fileName, open, onOpenChange }: ShareF
                 {isSending ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Sharing...
+                    Sending...
                   </>
                 ) : (
                   <>
                     <Share2 className="w-4 h-4 mr-2" />
-                    Share File
+                    Send Invitation
                   </>
                 )}
               </Button>

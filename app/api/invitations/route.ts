@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       .from("file_invitations")
       .select("id, status")
       .eq("file_id", fileId)
-      .eq("invitee_id", friendId)
+      .eq("to_user_id", friendId)
       .single()
 
     if (existing) {
@@ -55,8 +55,8 @@ export async function POST(request: Request) {
       .from("file_invitations")
       .insert({
         file_id: fileId,
-        inviter_id: user.id,
-        invitee_id: friendId,
+        from_user_id: user.id,
+        to_user_id: friendId,
         status: "pending",
       })
       .select()
@@ -97,9 +97,9 @@ export async function GET(request: Request) {
       .select(`
         *,
         file:files(id, title, cover_image_url),
-        inviter:profiles!file_invitations_inviter_id_fkey(id, username, display_name)
+        inviter:profiles!file_invitations_from_user_id_fkey(id, username, display_name)
       `)
-      .eq("invitee_id", user.id)
+      .eq("to_user_id", user.id)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
 
