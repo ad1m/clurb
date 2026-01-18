@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { Document, Page, pdfjs } from "react-pdf"
 import "react-pdf/dist/Page/AnnotationLayer.css"
 import "react-pdf/dist/Page/TextLayer.css"
@@ -37,6 +37,8 @@ export function PDFViewer({
   const [isLoading, setIsLoading] = useState(true)
   const [pageInput, setPageInput] = useState(currentPage.toString())
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [renderKey, setRenderKey] = useState(0)
+  const renderTaskRef = useRef<any>(null)
 
   useEffect(() => {
     setPageInput(currentPage.toString())
@@ -44,7 +46,21 @@ export function PDFViewer({
 
   useEffect(() => {
     console.log("[v0] PDF Viewer - fileUrl:", fileUrl)
+    // Reset state when fileUrl changes
+    setNumPages(null)
+    setIsLoading(true)
+    setLoadError(null)
+    setRenderKey(prev => prev + 1)
   }, [fileUrl])
+
+  // Cleanup render tasks on unmount
+  useEffect(() => {
+    return () => {
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel()
+      }
+    }
+  }, [])
 
   const onDocumentLoadSuccess = useCallback(
     ({ numPages }: { numPages: number }) => {
@@ -64,6 +80,12 @@ export function PDFViewer({
 
   const onPageRenderSuccess = useCallback(() => {
     console.log("[v0] PDF page rendered successfully")
+    renderTaskRef.current = null
+  }, [])
+
+  const onPageRenderError = useCallback((error: Error) => {
+    console.error("[v0] PDF page render error:", error.message)
+    renderTaskRef.current = null
   }, [])
 
   const goToPage = (page: number) => {
@@ -143,6 +165,7 @@ export function PDFViewer({
       <div className="flex-1 overflow-auto bg-muted/30 relative" onMouseUp={handleTextSelection}>
         <div className="flex justify-center py-8 min-h-full">
           <Document
+            key={`${fileUrl}-${renderKey}`}
             file={fileUrl}
             onLoadSuccess={onDocumentLoadSuccess}
             onLoadError={onDocumentLoadError}
@@ -161,12 +184,14 @@ export function PDFViewer({
           >
             <div className="relative shadow-xl">
               <Page
+                key={`page-${currentPage}-${scale}`}
                 pageNumber={currentPage}
                 scale={scale}
                 renderTextLayer={true}
                 renderAnnotationLayer={true}
                 className="bg-white"
                 onRenderSuccess={onPageRenderSuccess}
+                onRenderError={onPageRenderError}
                 loading={
                   <div className="flex items-center justify-center h-96 w-[612px] bg-white">
                     <Loader2 className="w-6 h-6 animate-spin text-primary" />
