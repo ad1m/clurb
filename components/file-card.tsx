@@ -4,14 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import type { File } from "@/lib/types"
 import { FileText, Users, Loader2 } from "lucide-react"
 import Link from "next/link"
-import { pdfjs } from "react-pdf"
 import { createClient } from "@/lib/supabase/client"
 import { FileActionsMenu } from "./file-actions-menu"
-
-// Set up PDF.js worker
-if (typeof window !== "undefined") {
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
-}
 
 interface FileCardProps {
   file: File
@@ -32,6 +26,14 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
     
     setIsGenerating(true)
     try {
+      // Dynamically import pdfjs only when needed
+      const { pdfjs } = await import("react-pdf")
+      
+      // Set up worker if not already set
+      if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+      }
+      
       const loadingTask = pdfjs.getDocument(file.file_url)
       const pdf = await loadingTask.promise
       const page = await pdf.getPage(1)
