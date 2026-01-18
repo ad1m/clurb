@@ -7,7 +7,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,10 +21,11 @@ import type { Profile } from "@/lib/types"
 interface ShareFileDialogProps {
   fileId: string
   fileName: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }
 
-export function ShareFileDialog({ fileId, fileName }: ShareFileDialogProps) {
-  const [open, setOpen] = useState(false)
+export function ShareFileDialog({ fileId, fileName, open, onOpenChange }: ShareFileDialogProps) {
   const [friends, setFriends] = useState<Profile[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedFriend, setSelectedFriend] = useState<Profile | null>(null)
@@ -47,15 +47,26 @@ export function ShareFileDialog({ fileId, fileName }: ShareFileDialogProps) {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // Get accepted friendships
+      // Get accepted friendships (bidirectional)
       const { data: friendships } = await supabase
         .from("friendships")
-        .select("*, friend:profiles!friendships_friend_id_fkey(*)")
-        .eq("user_id", user.id)
+        .select("user_id, friend_id")
+        .or(`user_id.eq.${user.id},friend_id.eq.${user.id}`)
         .eq("status", "accepted")
 
-      const friendProfiles = friendships?.map((f: any) => f.friend) || []
-      setFriends(friendProfiles)
+      if (!friendships || friendships.length === 0) {
+        setFriends([])
+        setIsLoading(false)
+        return
+      }
+
+      // Get friend IDs (bidirectional)
+      const friendIds = friendships.map((f) => (f.user_id === user.id ? f.friend_id : f.user_id))
+
+      // Fetch friend profiles
+      const { data: profiles } = await supabase.from("profiles").select("*").in("id", friendIds)
+
+      setFriends(profiles || [])
     } catch (error) {
       console.error("[v0] Error fetching friends:", error)
     } finally {
@@ -68,34 +79,27 @@ export function ShareFileDialog({ fileId, fileName }: ShareFileDialogProps) {
 
     setIsSending(true)
     try {
-      const response = await fetch("/api/files/invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileId,
-          toUserId: selectedFriend.id,
-          message,
-        }),
+      // Add friend directly to file_members
+      const { error } = await supabase.from("file_members").insert({
+        file_id: fileId,
+        user_id: selectedFriend.id,
+        role: "viewer",
       })
 
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to send invitation")
-      }
+      if (error) throw error
 
       toast({
-        title: "Invitation sent",
-        description: `${selectedFriend.display_name} has been invited to read "${fileName}"`,
+        title: "Friend invited",
+        description: `${selectedFriend.display_name || selectedFriend.username} can now access "${fileName}"`,
       })
 
-      setOpen(false)
+      onOpenChange(false)
       setSelectedFriend(null)
       setMessage("")
     } catch (error) {
       console.error("[v0] Error sending invitation:", error)
       toast({
-        title: "Failed to send invitation",
+        title: "Failed to invite friend",
         description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       })
@@ -110,12 +114,7 @@ export function ShareFileDialog({ fileId, fileName }: ShareFileDialogProps) {
   )
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8">
-          <Share2 className="w-4 h-4" />
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Share with Friends</DialogTitle>
@@ -146,6 +145,11 @@ export function ShareFileDialog({ fileId, fileName }: ShareFileDialogProps) {
                 <p className="text-sm">
                   {friends.length === 0 ? "You don't have any friends yet" : "No friends found"}
                 </p>
+                {friends.length === 0 && (
+                  <p className="text-xs mt-2">
+                    Add friends from the Friends page to share files with them
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -159,7 +163,7 @@ export function ShareFileDialog({ fileId, fileName }: ShareFileDialogProps) {
                       <AvatarFallback>{friend.display_name?.[0] || friend.username?.[0] || "?"}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{friend.display_name}</p>
+                      <p className="text-sm font-medium truncate">{friend.display_name || friend.username}</p>
                       <p className="text-xs text-muted-foreground truncate">@{friend.username}</p>
                     </div>
                   </button>
@@ -174,7 +178,7 @@ export function ShareFileDialog({ fileId, fileName }: ShareFileDialogProps) {
                 <AvatarFallback>{selectedFriend.display_name?.[0] || selectedFriend.username?.[0] || "?"}</AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{selectedFriend.display_name}</p>
+                <p className="text-sm font-medium truncate">{selectedFriend.display_name || selectedFriend.username}</p>
                 <p className="text-xs text-muted-foreground truncate">@{selectedFriend.username}</p>
               </div>
               <Button
@@ -186,31 +190,20 @@ export function ShareFileDialog({ fileId, fileName }: ShareFileDialogProps) {
               </Button>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="message">Message (optional)</Label>
-              <Textarea
-                id="message"
-                placeholder="Add a personal message..."
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                rows={3}
-              />
-            </div>
-
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setOpen(false)} disabled={isSending}>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSending}>
                 Cancel
               </Button>
               <Button onClick={handleSendInvitation} disabled={isSending}>
                 {isSending ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Sending...
+                    Sharing...
                   </>
                 ) : (
                   <>
                     <Share2 className="w-4 h-4 mr-2" />
-                    Send Invitation
+                    Share File
                   </>
                 )}
               </Button>
