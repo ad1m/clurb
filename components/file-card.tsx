@@ -29,9 +29,9 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
       // Dynamically import pdfjs only when needed
       const { pdfjs } = await import("react-pdf")
       
-      // Set up worker if not already set
+      // Set up worker if not already set - use legacy build to avoid ESM module resolution issues
       if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
       }
       
       const loadingTask = pdfjs.getDocument(file.file_url)
