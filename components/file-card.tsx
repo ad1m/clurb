@@ -23,18 +23,20 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
 
   const generateCover = useCallback(async () => {
     if (coverUrl || isGenerating || !file.file_url) return
-    
+
     setIsGenerating(true)
     try {
-      // Dynamically import pdfjs only when needed
-      const { pdfjs } = await import("react-pdf")
-      
-      // Set up worker if not already set - use legacy build to avoid ESM module resolution issues
-      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
-      }
-      
-      const loadingTask = pdfjs.getDocument(file.file_url)
+      // Dynamically import pdfjs-dist directly
+      const pdfjsLib = await import("pdfjs-dist")
+
+      // CRITICAL: Disable worker for cover generation to avoid module resolution issues
+      // Cover generation is a single page render, doesn't need worker performance
+      const loadingTask = pdfjsLib.getDocument({
+        url: file.file_url,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+      })
       const pdf = await loadingTask.promise
       const page = await pdf.getPage(1)
       
