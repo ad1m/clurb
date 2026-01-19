@@ -10,9 +10,9 @@ import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-reac
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
-// Set up PDF.js worker
+// Set up PDF.js worker - use legacy build to avoid ESM module resolution issues
 if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
 }
 
 interface PDFViewerProps {
