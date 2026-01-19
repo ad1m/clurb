@@ -3,13 +3,18 @@
 import type React from "react"
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { Document, Page } from "react-pdf"
-import type { pdfjs as pdfjsType } from "react-pdf"
+import { Document, Page, pdfjs } from "react-pdf"
 import "react-pdf/dist/Page/AnnotationLayer.css"
 import "react-pdf/dist/Page/TextLayer.css"
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+
+// Simple, working PDF.js worker configuration
+// Using unpkg CDN which works reliably with Next.js
+if (typeof window !== "undefined") {
+  pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`
+}
 
 interface PDFViewerProps {
   fileUrl: string
@@ -35,19 +40,6 @@ export function PDFViewer({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [renderKey, setRenderKey] = useState(0)
   const renderTaskRef = useRef<any>(null)
-
-  // Configure PDF.js worker on client side only
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      import("react-pdf").then(({ pdfjs }) => {
-        if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-          // Use versioned CDN URL to avoid module resolution
-          pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
-          console.log("[v0] PDF.js worker configured:", pdfjs.GlobalWorkerOptions.workerSrc)
-        }
-      })
-    }
-  }, [])
 
   useEffect(() => {
     setPageInput(currentPage.toString())
