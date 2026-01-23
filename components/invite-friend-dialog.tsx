@@ -74,24 +74,32 @@ export function InviteFriendDialog({
     setInvitingIds((prev) => new Set(prev).add(friendId))
 
     try {
-      const { error } = await supabase.from("file_members").insert({
-        file_id: fileId,
-        user_id: friendId,
-        role: "viewer",
+      // Use the invitations API to create a proper invitation
+      const response = await fetch("/api/invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileId,
+          friendId,
+        }),
       })
 
-      if (error) throw error
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send invitation")
+      }
 
       setInvitedIds((prev) => new Set(prev).add(friendId))
       toast({
-        title: "Friend invited",
-        description: "They can now access this document.",
+        title: "Invitation sent",
+        description: "Your friend will receive a notification to join this document.",
       })
       onInviteComplete?.()
-    } catch {
+    } catch (error) {
       toast({
         title: "Failed to invite",
-        description: "There was an error inviting your friend.",
+        description: error instanceof Error ? error.message : "There was an error inviting your friend.",
         variant: "destructive",
       })
     } finally {

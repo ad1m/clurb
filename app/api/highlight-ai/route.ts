@@ -1,4 +1,5 @@
-import { streamText, convertToModelMessages, type UIMessage } from "ai"
+import { streamText, convertToCoreMessages, type Message } from "ai"
+import { xai } from "@ai-sdk/xai"
 import { createClient } from "@/lib/supabase/server"
 
 export const maxDuration = 30
@@ -36,10 +37,10 @@ export async function POST(req: Request) {
 Be concise but thorough in your explanations. If asked to visualize or create an image description, provide a detailed description that could be used to generate an image.`
 
   const result = streamText({
-    model: "xai/grok-3-mini",
+    model: xai("grok-3-mini"),
     system: systemPrompt,
-    messages: convertToModelMessages(messages as UIMessage[]),
+    messages: convertToCoreMessages(messages as Message[]),
   })
 
-  return result.toUIMessageStreamResponse()
+  return result.toDataStreamResponse()
 }

@@ -40,6 +40,7 @@ export function PDFCoverGenerator({ fileUrl, onCoverGenerated }: PDFCoverGenerat
         await page.render({
           canvasContext: context,
           viewport: viewport,
+          canvas: canvas,
         }).promise
         
         const dataUrl = canvas.toDataURL("image/jpeg", 0.8)
