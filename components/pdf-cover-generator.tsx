@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react"
 import { pdfjs } from "react-pdf"
 
-// PDF.js worker configuration - using cdnjs CDN
+// PDF.js worker configuration - using unpkg CDN
 if (typeof window !== "undefined") {
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 }
 
 interface PDFCoverGeneratorProps {

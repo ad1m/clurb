@@ -6,10 +6,9 @@
 import { pdfjs } from "react-pdf"
 
 // Prevent PDF.js from trying to automatically resolve the worker
-// Use a direct URL to avoid Next.js module resolution issues
+// Use unpkg CDN which mirrors npm packages directly
 if (typeof window !== "undefined") {
-  // pdfjs 5.x uses .mjs extension for ES modules
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 }
 
 export { pdfjs }
