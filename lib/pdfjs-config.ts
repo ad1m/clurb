@@ -8,8 +8,8 @@ import { pdfjs } from "react-pdf"
 // Prevent PDF.js from trying to automatically resolve the worker
 // Use a direct URL to avoid Next.js module resolution issues
 if (typeof window !== "undefined") {
-  // Set the worker source to a CDN that serves the CommonJS build
-  pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
+  // pdfjs 5.x uses .mjs extension for ES modules
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
 }
 
 export { pdfjs }

@@ -8,9 +8,9 @@ import { createClient } from "@/lib/supabase/client"
 import { FileActionsMenu } from "./file-actions-menu"
 import { pdfjs } from "react-pdf"
 
-// Use the same simple worker configuration
+// PDF.js worker configuration - using cdnjs CDN
 if (typeof window !== "undefined") {
-  pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
 }
 
 interface FileCardProps {

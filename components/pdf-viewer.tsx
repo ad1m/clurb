@@ -10,10 +10,11 @@ import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-reac
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
-// Simple, working PDF.js worker configuration
-// Using unpkg CDN which works reliably with Next.js
+// PDF.js worker configuration
+// Using cdnjs CDN which is more reliable for pdfjs-dist
 if (typeof window !== "undefined") {
-  pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`
+  // pdfjs 5.x uses .mjs extension for ES modules
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
 }
 
 interface PDFViewerProps {
