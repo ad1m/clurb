@@ -1,4 +1,5 @@
-import { streamText, tool, convertToModelMessages, type UIMessage } from "ai"
+import { streamText, tool, convertToCoreMessages, type Message } from "ai"
+import { xai } from "@ai-sdk/xai"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
 
@@ -305,12 +306,12 @@ When presenting data:
 The user's reading activity is logged automatically as they use the app, including pages viewed, notes created, and messages sent.`
 
   const result = streamText({
-    model: "xai/grok-3-mini",
+    model: xai("grok-3-mini"),
     system: systemPrompt,
-    messages: convertToModelMessages(messages as UIMessage[]),
+    messages: convertToCoreMessages(messages as Message[]),
     tools,
     maxSteps: 5,
   })
 
-  return result.toUIMessageStreamResponse()
+  return result.toDataStreamResponse()
 }

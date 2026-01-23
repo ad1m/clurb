@@ -51,6 +51,7 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
       await page.render({
         canvasContext: context,
         viewport: viewport,
+        canvas: canvas,
       }).promise
 
       const dataUrl = canvas.toDataURL("image/jpeg", 0.7)
