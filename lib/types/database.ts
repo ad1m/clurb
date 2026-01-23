@@ -95,15 +95,29 @@ export interface Friendship {
   friend?: Profile
 }
 
+export interface FileInvitation {
+  id: string
+  file_id: string
+  from_user_id: string
+  to_user_id: string
+  status: "pending" | "accepted" | "declined"
+  message: string | null
+  created_at: string
+  responded_at: string | null
+  file?: File
+  inviter?: Profile
+}
+
 // Action types for activity logging
 export type ActivityActionType =
-  | "file_upload"
+  | "file_uploaded"
   | "file_view"
-  | "page_turn"
+  | "page_viewed"
   | "sticky_note_created"
   | "sticky_note_viewed"
   | "chat_message_sent"
   | "highlight_created"
-  | "ai_interaction"
+  | "ai_highlight_query"
   | "friend_added"
   | "file_shared"
+  | "file_joined"

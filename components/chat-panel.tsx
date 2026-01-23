@@ -24,6 +24,7 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
   const [newMessage, setNewMessage] = useState("")
   const [isSending, setIsSending] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [currentUserProfile, setCurrentUserProfile] = useState<Profile | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
@@ -32,6 +33,7 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
   }, [])
 
   const fetchMessages = useCallback(async () => {
+    // Fetch messages
     const { data } = await supabase
       .from("chat_messages")
       .select(`
@@ -43,9 +45,20 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
       .limit(100)
 
     setMessages(data || [])
+
+    // Fetch current user profile for optimistic updates
+    if (!currentUserProfile) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", currentUserId)
+        .single()
+      setCurrentUserProfile(profile)
+    }
+
     setIsLoading(false)
     setTimeout(scrollToBottom, 100)
-  }, [fileId, supabase, scrollToBottom])
+  }, [fileId, supabase, scrollToBottom, currentUserId, currentUserProfile])
 
   useEffect(() => {
     if (isOpen) {
@@ -71,11 +84,19 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
               .single()
 
             const newMsg = { ...payload.new, sender: profile } as ChatMessage & { sender?: Profile }
-            setMessages((prev) => [...prev, newMsg])
+            // Prevent duplicates by checking if message already exists
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === newMsg.id)) {
+                return prev
+              }
+              return [...prev, newMsg]
+            })
             setTimeout(scrollToBottom, 100)
           },
         )
-        .subscribe()
+        .subscribe((status) => {
+          console.log("[v0] Chat subscription status:", status)
+        })
 
       return () => {
         supabase.removeChannel(channel)
@@ -87,25 +108,57 @@ export function ChatPanel({ fileId, currentUserId, isOpen, onClose }: ChatPanelP
     e.preventDefault()
     if (!newMessage.trim() || isSending) return
 
+    const messageContent = newMessage.trim()
+    const tempId = `temp-${Date.now()}`
+
+    // Optimistic update - add message immediately
+    const optimisticMessage: ChatMessage & { sender?: Profile } = {
+      id: tempId,
+      file_id: fileId,
+      sender_id: currentUserId,
+      content: messageContent,
+      created_at: new Date().toISOString(),
+      sender: currentUserProfile || undefined,
+    }
+
+    setMessages((prev) => [...prev, optimisticMessage])
+    setNewMessage("")
+    setTimeout(scrollToBottom, 100)
+
     setIsSending(true)
     try {
-      await supabase.from("chat_messages").insert({
-        file_id: fileId,
-        sender_id: currentUserId,
-        content: newMessage.trim(),
-      })
+      const { data: insertedMessage } = await supabase
+        .from("chat_messages")
+        .insert({
+          file_id: fileId,
+          sender_id: currentUserId,
+          content: messageContent,
+        })
+        .select()
+        .single()
+
+      // Replace temp message with real one
+      if (insertedMessage) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId
+              ? { ...insertedMessage, sender: currentUserProfile || undefined }
+              : m
+          )
+        )
+      }
 
       // Log activity
       await supabase.from("activity_log").insert({
         user_id: currentUserId,
         file_id: fileId,
         action_type: "chat_message_sent",
-        metadata: { message_length: newMessage.trim().length },
+        metadata: { message_length: messageContent.length },
       })
-
-      setNewMessage("")
     } catch (error) {
       console.error("Failed to send message:", error)
+      // Remove optimistic message on error
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
     } finally {
       setIsSending(false)
     }

@@ -103,3 +103,17 @@ export interface Friendship {
   user?: Profile
   friend?: Profile
 }
+
+export interface FileInvitation {
+  id: string
+  file_id: string
+  from_user_id: string
+  to_user_id: string
+  status: "pending" | "accepted" | "declined"
+  message: string | null
+  created_at: string
+  responded_at: string | null
+  // Joined fields
+  file?: File
+  inviter?: Profile
+}

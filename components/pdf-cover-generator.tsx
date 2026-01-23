@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react"
 import { pdfjs } from "react-pdf"
 
-// Set up PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+// PDF.js worker configuration - using unpkg CDN
+if (typeof window !== "undefined") {
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+}
 
 interface PDFCoverGeneratorProps {
   fileUrl: string
@@ -40,6 +42,7 @@ export function PDFCoverGenerator({ fileUrl, onCoverGenerated }: PDFCoverGenerat
         await page.render({
           canvasContext: context,
           viewport: viewport,
+          canvas: canvas,
         }).promise
         
         const dataUrl = canvas.toDataURL("image/jpeg", 0.8)

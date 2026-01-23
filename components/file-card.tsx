@@ -6,6 +6,12 @@ import { FileText, Users, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { FileActionsMenu } from "./file-actions-menu"
+import { pdfjs } from "react-pdf"
+
+// PDF.js worker configuration - using unpkg CDN
+if (typeof window !== "undefined") {
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+}
 
 interface FileCardProps {
   file: File
@@ -26,40 +32,31 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
 
     setIsGenerating(true)
     try {
-      // Dynamically import pdfjs-dist directly
-      const pdfjsLib = await import("pdfjs-dist")
-
-      // CRITICAL: Disable worker for cover generation to avoid module resolution issues
-      // Cover generation is a single page render, doesn't need worker performance
-      const loadingTask = pdfjsLib.getDocument({
-        url: file.file_url,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-        useSystemFonts: true,
-      })
+      const loadingTask = pdfjs.getDocument(file.file_url)
       const pdf = await loadingTask.promise
       const page = await pdf.getPage(1)
-      
+
       const scale = 0.5
       const viewport = page.getViewport({ scale })
-      
+
       const canvas = canvasRef.current
       if (!canvas) return
-      
+
       const context = canvas.getContext("2d")
       if (!context) return
-      
+
       canvas.height = viewport.height
       canvas.width = viewport.width
-      
+
       await page.render({
         canvasContext: context,
         viewport: viewport,
+        canvas: canvas,
       }).promise
-      
+
       const dataUrl = canvas.toDataURL("image/jpeg", 0.7)
       setCoverUrl(dataUrl)
-      
+
       supabase.from("files").update({ cover_image_url: dataUrl }).eq("id", file.id).then(() => {})
     } catch (error) {
       console.error("[v0] Failed to generate cover:", error)
@@ -77,11 +74,11 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
   return (
     <Link href={`/read/${file.id}`} className="group block">
       <canvas ref={canvasRef} className="hidden" />
-      
+
       {/* Cover Image - poster style with rounded corners */}
       <div className="aspect-[3/4] relative rounded-xl overflow-hidden bg-muted">
         {/* Actions menu in top right */}
-        <div 
+        <div
           className="absolute top-2 right-2 z-10"
           onClick={(e) => {
             e.preventDefault()
@@ -90,7 +87,7 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
         >
           <FileActionsMenu fileId={file.id} fileName={file.title} onUpdate={() => onUpdate?.()} />
         </div>
-        
+
         {coverUrl ? (
           <img
             src={coverUrl || "/placeholder.svg"}
