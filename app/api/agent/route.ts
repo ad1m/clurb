@@ -2,8 +2,52 @@ import { streamText, tool, convertToCoreMessages, type Message } from "ai"
 import { xai } from "@ai-sdk/xai"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 
 export const maxDuration = 60
+
+// Helper function to extract text from a PDF URL for specific pages
+async function extractPdfText(pdfUrl: string, startPage: number, endPage: number): Promise<string> {
+  try {
+    // Fetch the PDF file
+    const response = await fetch(pdfUrl)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch PDF: ${response.status}`)
+    }
+    const arrayBuffer = await response.arrayBuffer()
+
+    // Load the PDF document
+    const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
+    const pdf = await loadingTask.promise
+
+    // Clamp page numbers to valid range
+    const totalPages = pdf.numPages
+    const actualStartPage = Math.max(1, Math.min(startPage, totalPages))
+    const actualEndPage = Math.max(actualStartPage, Math.min(endPage, totalPages))
+
+    // Extract text from each page
+    const textParts: string[] = []
+    for (let pageNum = actualStartPage; pageNum <= actualEndPage; pageNum++) {
+      const page = await pdf.getPage(pageNum)
+      const textContent = await page.getTextContent()
+      const pageText = textContent.items
+        .map((item) => {
+          // TextItem has 'str' property, TextMarkedContent doesn't
+          if ("str" in item) {
+            return item.str
+          }
+          return ""
+        })
+        .join(" ")
+      textParts.push(`--- Page ${pageNum} ---\n${pageText}`)
+    }
+
+    return textParts.join("\n\n")
+  } catch (error) {
+    console.error("PDF text extraction error:", error)
+    throw error
+  }
+}
 
 export async function POST(req: Request) {
   const { messages } = await req.json()
@@ -466,14 +510,82 @@ export async function POST(req: Request) {
         }
       },
     }),
+
+    getBookContent: tool({
+      description: "Extract text content from a book/PDF for a specific page range. Use this when the user asks for a summary, explanation, or details about specific pages or content from a book.",
+      parameters: z.object({
+        bookTitle: z.string().describe("The title or partial title of the book to extract content from"),
+        startPage: z.number().describe("The starting page number (1-indexed)"),
+        endPage: z.number().describe("The ending page number (1-indexed). Max 10 pages at a time for performance."),
+      }),
+      execute: async ({ bookTitle, startPage, endPage }) => {
+        // Limit to max 10 pages at a time for performance
+        const maxPages = 10
+        const actualEndPage = Math.min(endPage, startPage + maxPages - 1)
+
+        // Find the book by title that user has access to
+        const { data: memberFiles } = await supabase
+          .from("file_members")
+          .select("file_id")
+          .eq("user_id", userId)
+
+        const { data: ownedFiles } = await supabase
+          .from("files")
+          .select("id")
+          .eq("owner_id", userId)
+
+        const allFileIds = [
+          ...(memberFiles?.map(f => f.file_id) || []),
+          ...(ownedFiles?.map(f => f.id) || [])
+        ]
+        const uniqueFileIds = [...new Set(allFileIds)]
+
+        if (uniqueFileIds.length === 0) {
+          return { success: false, message: "No books in your library." }
+        }
+
+        const { data: file } = await supabase
+          .from("files")
+          .select("id, title, file_url, total_pages, file_type")
+          .ilike("title", `%${bookTitle}%`)
+          .in("id", uniqueFileIds)
+          .limit(1)
+          .single()
+
+        if (!file) {
+          return { success: false, message: `Could not find a book matching "${bookTitle}" in your library.` }
+        }
+
+        if (file.file_type !== "application/pdf") {
+          return { success: false, message: "Content extraction is only supported for PDF files." }
+        }
+
+        try {
+          const text = await extractPdfText(file.file_url, startPage, actualEndPage)
+          return {
+            success: true,
+            bookTitle: file.title,
+            totalPages: file.total_pages,
+            extractedPages: { start: startPage, end: actualEndPage },
+            content: text,
+          }
+        } catch (error) {
+          return {
+            success: false,
+            message: `Failed to extract content from the PDF: ${error instanceof Error ? error.message : "Unknown error"}`,
+          }
+        }
+      },
+    }),
   }
 
   const systemPrompt = `You are Clurb AI, a helpful reading assistant for the Clurb social reading app.
-You help users understand their reading habits, find information about their books, and interact with their reading community.
+You help users understand their reading habits, find information about their books, summarize content, and interact with their reading community.
 
 You have access to these tools:
 - getUserBooks: Get all books in the user's library with reading progress
 - getBookProgress: Get progress for a specific book by title
+- getBookContent: Extract and read actual text content from a book's pages (use this for summaries, explanations, or answering questions about content)
 - getLastReadBook: Get the most recently read book
 - getReadingActivity: Get reading activity summary for a time period
 - getDailyReadingStats: Get daily page counts for charts
@@ -483,11 +595,13 @@ You have access to these tools:
 - getUserFriends: Get list of user's friends
 
 IMPORTANT INSTRUCTIONS:
-- When asked about a specific book, use getBookProgress with the book title
+- When asked about a specific book's progress, use getBookProgress with the book title
 - When asked "what books do I have", use getUserBooks
+- When asked for a SUMMARY, EXPLANATION, or to DESCRIBE content from specific pages, use getBookContent to extract the text first, then summarize it
 - When asked about reading activity, use getReadingActivity
 - When asked about charts or visualizations, use getDailyReadingStats
 - When asked about friends reading something, use getFriendsReadingBook
+- You CAN summarize book content because you have access to the actual PDF text through getBookContent
 
 Be conversational and friendly. Use specific numbers and page counts when available.
 Keep responses concise and helpful. Don't explain what tools you're using - just provide the answer.`
