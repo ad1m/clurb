@@ -2,7 +2,8 @@ import { streamText, tool, convertToCoreMessages, type Message } from "ai"
 import { xai } from "@ai-sdk/xai"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
+// @ts-expect-error - pdf-parse doesn't have type definitions
+import pdfParse from "pdf-parse/lib/pdf-parse.js"
 
 export const maxDuration = 60
 
@@ -15,31 +16,41 @@ async function extractPdfText(pdfUrl: string, startPage: number, endPage: number
       throw new Error(`Failed to fetch PDF: ${response.status}`)
     }
     const arrayBuffer = await response.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
 
-    // Load the PDF document
-    const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
-    const pdf = await loadingTask.promise
+    // Collect text from specific pages
+    const pageTexts: Map<number, string> = new Map()
 
-    // Clamp page numbers to valid range
-    const totalPages = pdf.numPages
-    const actualStartPage = Math.max(1, Math.min(startPage, totalPages))
-    const actualEndPage = Math.max(actualStartPage, Math.min(endPage, totalPages))
-
-    // Extract text from each page
-    const textParts: string[] = []
-    for (let pageNum = actualStartPage; pageNum <= actualEndPage; pageNum++) {
-      const page = await pdf.getPage(pageNum)
-      const textContent = await page.getTextContent()
-      const pageText = textContent.items
-        .map((item) => {
-          // TextItem has 'str' property, TextMarkedContent doesn't
-          if ("str" in item) {
-            return item.str
+    // Custom page render function to get page-specific text
+    const options = {
+      pagerender: function(pageData: { pageIndex: number; getTextContent: () => Promise<{ items: Array<{ str?: string }> }> }) {
+        return pageData.getTextContent().then(function(textContent) {
+          const pageNum = pageData.pageIndex + 1 // pageIndex is 0-based
+          if (pageNum >= startPage && pageNum <= endPage) {
+            const text = textContent.items
+              .map((item) => item.str || "")
+              .join(" ")
+            pageTexts.set(pageNum, text)
           }
-          return ""
+          return "" // Return empty to avoid building full text
         })
-        .join(" ")
-      textParts.push(`--- Page ${pageNum} ---\n${pageText}`)
+      },
+      max: endPage, // Only process up to endPage
+    }
+
+    await pdfParse(buffer, options)
+
+    // Build result from collected pages
+    const textParts: string[] = []
+    for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+      const pageText = pageTexts.get(pageNum)
+      if (pageText !== undefined) {
+        textParts.push(`--- Page ${pageNum} ---\n${pageText}`)
+      }
+    }
+
+    if (textParts.length === 0) {
+      throw new Error(`No text found in pages ${startPage}-${endPage}`)
     }
 
     return textParts.join("\n\n")
