@@ -122,43 +122,53 @@ export default function AgentPage() {
           /* Chat Messages */
           <ScrollArea className="flex-1 py-6" ref={scrollRef}>
             <div className="space-y-6">
-              {messages.map((message) => (
-                <div key={message.id} className={cn("flex gap-3", message.role === "user" && "flex-row-reverse")}>
-                  {message.role === "assistant" ? (
-                    <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
-                      <Sparkles className="w-4 h-4 text-primary-foreground" />
+              {messages
+                // Filter out assistant messages with no content (intermediate tool-only messages)
+                .filter((message) => {
+                  if (message.role === "user") return true
+                  // Only show assistant messages that have actual text content
+                  const content = typeof message.content === "string" ? message.content : ""
+                  return content.trim().length > 0
+                })
+                .map((message) => {
+                  // Check if this message has a chart to display
+                  const chartInvocation = message.toolInvocations?.find(
+                    (t) => t.state === "result" && t.toolName === "getDailyReadingStats"
+                  )
+                  const chartData = chartInvocation && "result" in chartInvocation ? chartInvocation.result?.data : null
+
+                  const content = typeof message.content === "string" ? message.content : ""
+
+                  return (
+                    <div key={message.id} className={cn("flex gap-3", message.role === "user" && "flex-row-reverse")}>
+                      {message.role === "assistant" ? (
+                        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
+                          <Sparkles className="w-4 h-4 text-primary-foreground" />
+                        </div>
+                      ) : (
+                        <Avatar className="w-8 h-8">
+                          <AvatarImage src={profile?.avatar_url || undefined} />
+                          <AvatarFallback className="bg-secondary text-sm">{initials}</AvatarFallback>
+                        </Avatar>
+                      )}
+                      <div
+                        className={cn(
+                          "max-w-[80%] rounded-2xl px-4 py-3",
+                          message.role === "user"
+                            ? "bg-primary text-primary-foreground rounded-tr-sm"
+                            : "bg-card border border-border rounded-tl-sm",
+                        )}
+                      >
+                        {chartData && (
+                          <div className="mb-3">
+                            <ReadingChart data={chartData as { date: string; pages: number }[]} />
+                          </div>
+                        )}
+                        <div className="text-sm whitespace-pre-wrap">{content}</div>
+                      </div>
                     </div>
-                  ) : (
-                    <Avatar className="w-8 h-8">
-                      <AvatarImage src={profile?.avatar_url || undefined} />
-                      <AvatarFallback className="bg-secondary text-sm">{initials}</AvatarFallback>
-                    </Avatar>
-                  )}
-                  <div
-                    className={cn(
-                      "max-w-[80%] rounded-2xl px-4 py-3",
-                      message.role === "user"
-                        ? "bg-primary text-primary-foreground rounded-tr-sm"
-                        : "bg-card border border-border rounded-tl-sm",
-                    )}
-                  >
-                    {message.toolInvocations?.map((toolInvocation, index) => {
-                      if (toolInvocation.state === "result") {
-                        // Render chart for daily stats
-                        if (toolInvocation.toolName === "getDailyReadingStats" && toolInvocation.result?.data) {
-                          return (
-                            <div key={index} className="mb-3">
-                              <ReadingChart data={toolInvocation.result.data} />
-                            </div>
-                          )
-                        }
-                      }
-                      return null
-                    })}
-                    <div className="text-sm whitespace-pre-wrap">{message.content}</div>
-                  </div>
-                </div>
-              ))}
+                  )
+                })}
               {isChatLoading && (
                 <div className="flex gap-3">
                   <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">

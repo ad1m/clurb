@@ -2,8 +2,46 @@ import { streamText, tool, convertToCoreMessages, type Message } from "ai"
 import { xai } from "@ai-sdk/xai"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
+import { extractText } from "unpdf"
 
 export const maxDuration = 60
+
+// Helper function to extract text from a PDF URL for specific pages
+async function extractPdfText(pdfUrl: string, startPage: number, endPage: number): Promise<string> {
+  try {
+    // Fetch the PDF file
+    const response = await fetch(pdfUrl)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch PDF: ${response.status}`)
+    }
+    const arrayBuffer = await response.arrayBuffer()
+
+    // Extract text from PDF using unpdf
+    const { text, totalPages } = await extractText(arrayBuffer, { mergePages: false })
+
+    // Clamp page numbers to valid range
+    const actualStartPage = Math.max(1, Math.min(startPage, totalPages))
+    const actualEndPage = Math.max(actualStartPage, Math.min(endPage, totalPages))
+
+    // Build result from specified pages (text array is 0-indexed)
+    const textParts: string[] = []
+    for (let pageNum = actualStartPage; pageNum <= actualEndPage; pageNum++) {
+      const pageText = text[pageNum - 1] // Convert to 0-indexed
+      if (pageText) {
+        textParts.push(`--- Page ${pageNum} ---\n${pageText}`)
+      }
+    }
+
+    if (textParts.length === 0) {
+      throw new Error(`No text found in pages ${startPage}-${endPage}`)
+    }
+
+    return textParts.join("\n\n")
+  } catch (error) {
+    console.error("PDF text extraction error:", error)
+    throw error
+  }
+}
 
 export async function POST(req: Request) {
   const { messages } = await req.json()
@@ -258,52 +296,309 @@ export async function POST(req: Request) {
     }),
 
     getUserBooks: tool({
-      description: "Get a list of all books/files in the user's library",
+      description: "Get a list of all books/files in the user's library with their reading progress",
       parameters: z.object({}),
       execute: async () => {
+        // First get file IDs where user is owner or member
+        const { data: memberFiles } = await supabase
+          .from("file_members")
+          .select("file_id")
+          .eq("user_id", userId)
+
+        const { data: ownedFiles } = await supabase
+          .from("files")
+          .select("id")
+          .eq("owner_id", userId)
+
+        const allFileIds = [
+          ...(memberFiles?.map(f => f.file_id) || []),
+          ...(ownedFiles?.map(f => f.id) || [])
+        ]
+        const uniqueFileIds = [...new Set(allFileIds)]
+
+        if (uniqueFileIds.length === 0) {
+          return { found: false, message: "No books in your library yet." }
+        }
+
+        // Get files with progress
         const { data: files } = await supabase
           .from("files")
-          .select(`
-            id, title, total_pages, created_at,
-            progress:reading_progress(current_page, last_read_at)
-          `)
-          .or(`owner_id.eq.${userId},id.in.(select file_id from file_members where user_id = '${userId}')`)
+          .select("id, title, total_pages, created_at")
+          .in("id", uniqueFileIds)
           .order("created_at", { ascending: false })
 
         if (!files || files.length === 0) {
           return { found: false, message: "No books in your library yet." }
         }
 
+        // Get reading progress for these files
+        const { data: progressData } = await supabase
+          .from("reading_progress")
+          .select("file_id, current_page, last_read_at")
+          .eq("user_id", userId)
+          .in("file_id", uniqueFileIds)
+
+        const progressMap = new Map(progressData?.map(p => [p.file_id, p]) || [])
+
         return {
           found: true,
+          count: files.length,
           books: files.map((f) => {
-            const userProgress = Array.isArray(f.progress)
-              ? f.progress.find((p: { current_page?: number }) => p.current_page !== undefined)
-              : f.progress
+            const progress = progressMap.get(f.id)
             return {
               title: f.title,
               totalPages: f.total_pages,
-              currentPage: userProgress?.current_page || 0,
-              lastReadAt: userProgress?.last_read_at,
+              currentPage: progress?.current_page || 0,
+              lastReadAt: progress?.last_read_at || null,
+              percentComplete: f.total_pages > 0 ? Math.round(((progress?.current_page || 0) / f.total_pages) * 100) : 0,
             }
           }),
         }
       },
     }),
+
+    getBookProgress: tool({
+      description: "Get the user's reading progress for a specific book by title",
+      parameters: z.object({
+        bookTitle: z.string().describe("The title or partial title of the book to look up"),
+      }),
+      execute: async ({ bookTitle }) => {
+        // Find the book by title (case-insensitive partial match)
+        const { data: files } = await supabase
+          .from("files")
+          .select("id, title, total_pages")
+          .ilike("title", `%${bookTitle}%`)
+          .limit(5)
+
+        if (!files || files.length === 0) {
+          return { found: false, message: `Could not find a book matching "${bookTitle}" in your library.` }
+        }
+
+        // Get reading progress for matched files
+        const fileIds = files.map(f => f.id)
+        const { data: progressData } = await supabase
+          .from("reading_progress")
+          .select("file_id, current_page, last_read_at")
+          .eq("user_id", userId)
+          .in("file_id", fileIds)
+
+        const progressMap = new Map(progressData?.map(p => [p.file_id, p]) || [])
+
+        const results = files.map(f => {
+          const progress = progressMap.get(f.id)
+          return {
+            title: f.title,
+            totalPages: f.total_pages,
+            currentPage: progress?.current_page || 0,
+            lastReadAt: progress?.last_read_at || null,
+            percentComplete: f.total_pages > 0 ? Math.round(((progress?.current_page || 0) / f.total_pages) * 100) : 0,
+            hasStarted: !!progress,
+          }
+        })
+
+        return {
+          found: true,
+          searchQuery: bookTitle,
+          matchCount: results.length,
+          books: results,
+        }
+      },
+    }),
+
+    getFriendsReadingBook: tool({
+      description: "Find which friends are also reading a specific book",
+      parameters: z.object({
+        bookTitle: z.string().describe("The title or partial title of the book"),
+      }),
+      execute: async ({ bookTitle }) => {
+        // Find the book
+        const { data: files } = await supabase
+          .from("files")
+          .select("id, title")
+          .ilike("title", `%${bookTitle}%`)
+          .limit(1)
+          .single()
+
+        if (!files) {
+          return { found: false, message: `Could not find a book matching "${bookTitle}".` }
+        }
+
+        // Get all members of this file (excluding the user)
+        const { data: members } = await supabase
+          .from("file_members")
+          .select(`
+            user_id,
+            user:profiles(username, display_name)
+          `)
+          .eq("file_id", files.id)
+          .neq("user_id", userId)
+
+        if (!members || members.length === 0) {
+          return { found: true, bookTitle: files.title, friends: [], message: "No friends are reading this book yet." }
+        }
+
+        // Get their reading progress
+        const memberIds = members.map(m => m.user_id)
+        const { data: progressData } = await supabase
+          .from("reading_progress")
+          .select("user_id, current_page, last_read_at")
+          .eq("file_id", files.id)
+          .in("user_id", memberIds)
+
+        const progressMap = new Map(progressData?.map(p => [p.user_id, p]) || [])
+
+        const friendsReading = members.map(m => {
+          const progress = progressMap.get(m.user_id)
+          // Supabase returns single relation as object, but TS thinks it's array
+          const userProfile = m.user as unknown as { username: string; display_name: string | null } | null
+          return {
+            username: userProfile?.username,
+            displayName: userProfile?.display_name || userProfile?.username,
+            currentPage: progress?.current_page || 0,
+            lastReadAt: progress?.last_read_at,
+          }
+        })
+
+        return {
+          found: true,
+          bookTitle: files.title,
+          friendCount: friendsReading.length,
+          friends: friendsReading,
+        }
+      },
+    }),
+
+    getUserFriends: tool({
+      description: "Get a list of the user's friends",
+      parameters: z.object({}),
+      execute: async () => {
+        const { data: friendships } = await supabase
+          .from("friendships")
+          .select(`
+            user_id,
+            friend_id,
+            user:profiles!friendships_user_id_fkey(username, display_name),
+            friend:profiles!friendships_friend_id_fkey(username, display_name)
+          `)
+          .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
+          .eq("status", "accepted")
+
+        if (!friendships || friendships.length === 0) {
+          return { found: false, message: "You don't have any friends added yet." }
+        }
+
+        const friends = friendships.map(f => {
+          const isFriend = f.user_id === userId
+          // Supabase returns single relation as object, but TS thinks it's array
+          const friendProfile = (isFriend ? f.friend : f.user) as unknown as { username: string; display_name: string | null } | null
+          return {
+            username: friendProfile?.username,
+            displayName: friendProfile?.display_name || friendProfile?.username,
+          }
+        })
+
+        return {
+          found: true,
+          count: friends.length,
+          friends,
+        }
+      },
+    }),
+
+    getBookContent: tool({
+      description: "Extract text content from a book/PDF for a specific page range. Use this when the user asks for a summary, explanation, or details about specific pages or content from a book.",
+      parameters: z.object({
+        bookTitle: z.string().describe("The title or partial title of the book to extract content from"),
+        startPage: z.number().describe("The starting page number (1-indexed)"),
+        endPage: z.number().describe("The ending page number (1-indexed). Max 10 pages at a time for performance."),
+      }),
+      execute: async ({ bookTitle, startPage, endPage }) => {
+        // Limit to max 10 pages at a time for performance
+        const maxPages = 10
+        const actualEndPage = Math.min(endPage, startPage + maxPages - 1)
+
+        // Find the book by title that user has access to
+        const { data: memberFiles } = await supabase
+          .from("file_members")
+          .select("file_id")
+          .eq("user_id", userId)
+
+        const { data: ownedFiles } = await supabase
+          .from("files")
+          .select("id")
+          .eq("owner_id", userId)
+
+        const allFileIds = [
+          ...(memberFiles?.map(f => f.file_id) || []),
+          ...(ownedFiles?.map(f => f.id) || [])
+        ]
+        const uniqueFileIds = [...new Set(allFileIds)]
+
+        if (uniqueFileIds.length === 0) {
+          return { success: false, message: "No books in your library." }
+        }
+
+        const { data: file } = await supabase
+          .from("files")
+          .select("id, title, file_url, total_pages, file_type")
+          .ilike("title", `%${bookTitle}%`)
+          .in("id", uniqueFileIds)
+          .limit(1)
+          .single()
+
+        if (!file) {
+          return { success: false, message: `Could not find a book matching "${bookTitle}" in your library.` }
+        }
+
+        if (file.file_type !== "application/pdf") {
+          return { success: false, message: "Content extraction is only supported for PDF files." }
+        }
+
+        try {
+          const text = await extractPdfText(file.file_url, startPage, actualEndPage)
+          return {
+            success: true,
+            bookTitle: file.title,
+            totalPages: file.total_pages,
+            extractedPages: { start: startPage, end: actualEndPage },
+            content: text,
+          }
+        } catch (error) {
+          return {
+            success: false,
+            message: `Failed to extract content from the PDF: ${error instanceof Error ? error.message : "Unknown error"}`,
+          }
+        }
+      },
+    }),
   }
 
-  const systemPrompt = `You are Clurb AI, a helpful reading assistant for the Clurb social reading app. 
-You help users understand their reading habits, find information about their books, and interact with their reading community.
+  const systemPrompt = `You are Clurb AI, a helpful reading assistant for the Clurb social reading app.
+You help users understand their reading habits, find information about their books, summarize content, and interact with their reading community.
 
-You have access to tools that can query the user's reading data, activity, and social interactions.
+You have access to these tools:
+- getUserBooks: Get all books in the user's library with reading progress
+- getBookProgress: Get progress for a specific book by title
+- getBookContent: Extract and read actual text content from a book's pages (use this for summaries, explanations, or answering questions about content)
+- getLastReadBook: Get the most recently read book
+- getReadingActivity: Get reading activity summary for a time period
+- getDailyReadingStats: Get daily page counts for charts
+- getFriendNotes: Get notes friends left in user's files
+- getFriendProgress: Get a friend's progress on a shared book
+- getFriendsReadingBook: Find friends reading a specific book
+- getUserFriends: Get list of user's friends
 
-When presenting data:
-- Be conversational and friendly
-- Use specific numbers and details when available
-- Suggest ways to improve reading habits when appropriate
-- When showing daily stats, format them nicely for display
+IMPORTANT INSTRUCTIONS:
+- When asked about a specific book's progress, use getBookProgress with the book title
+- When asked "what books do I have", use getUserBooks
+- When asked for a SUMMARY, EXPLANATION, or to DESCRIBE content from specific pages, use getBookContent to extract the text first, then summarize it
+- When asked about reading activity, use getReadingActivity
+- When asked about charts or visualizations, use getDailyReadingStats
+- When asked about friends reading something, use getFriendsReadingBook
+- You CAN summarize book content because you have access to the actual PDF text through getBookContent
 
-The user's reading activity is logged automatically as they use the app, including pages viewed, notes created, and messages sent.`
+Be conversational and friendly. Use specific numbers and page counts when available.
+Keep responses concise and helpful. Don't explain what tools you're using - just provide the answer.`
 
   const result = streamText({
     model: xai("grok-3-mini"),
