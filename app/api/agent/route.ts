@@ -2,8 +2,7 @@ import { streamText, tool, convertToCoreMessages, type Message } from "ai"
 import { xai } from "@ai-sdk/xai"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
-// @ts-expect-error - pdf-parse doesn't have type definitions
-import pdfParse from "pdf-parse"
+import { extractText } from "unpdf"
 
 export const maxDuration = 60
 
@@ -16,35 +15,19 @@ async function extractPdfText(pdfUrl: string, startPage: number, endPage: number
       throw new Error(`Failed to fetch PDF: ${response.status}`)
     }
     const arrayBuffer = await response.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
 
-    // Collect text from specific pages
-    const pageTexts: Map<number, string> = new Map()
+    // Extract text from PDF using unpdf
+    const { text, totalPages } = await extractText(arrayBuffer, { mergePages: false })
 
-    // Custom page render function to get page-specific text
-    const options = {
-      pagerender: function(pageData: { pageIndex: number; getTextContent: () => Promise<{ items: Array<{ str?: string }> }> }) {
-        return pageData.getTextContent().then(function(textContent) {
-          const pageNum = pageData.pageIndex + 1 // pageIndex is 0-based
-          if (pageNum >= startPage && pageNum <= endPage) {
-            const text = textContent.items
-              .map((item) => item.str || "")
-              .join(" ")
-            pageTexts.set(pageNum, text)
-          }
-          return "" // Return empty to avoid building full text
-        })
-      },
-      max: endPage, // Only process up to endPage
-    }
+    // Clamp page numbers to valid range
+    const actualStartPage = Math.max(1, Math.min(startPage, totalPages))
+    const actualEndPage = Math.max(actualStartPage, Math.min(endPage, totalPages))
 
-    await pdfParse(buffer, options)
-
-    // Build result from collected pages
+    // Build result from specified pages (text array is 0-indexed)
     const textParts: string[] = []
-    for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
-      const pageText = pageTexts.get(pageNum)
-      if (pageText !== undefined) {
+    for (let pageNum = actualStartPage; pageNum <= actualEndPage; pageNum++) {
+      const pageText = text[pageNum - 1] // Convert to 0-indexed
+      if (pageText) {
         textParts.push(`--- Page ${pageNum} ---\n${pageText}`)
       }
     }
