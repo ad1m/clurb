@@ -121,3 +121,24 @@ export type ActivityActionType =
   | "friend_added"
   | "file_shared"
   | "file_joined"
+
+// Agent Chat types
+export interface AgentChat {
+  id: string
+  user_id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentMessage {
+  id: string
+  chat_id: string
+  role: "user" | "assistant"
+  content: string
+  created_at: string
+}
+
+export interface AgentChatWithMessages extends AgentChat {
+  messages: AgentMessage[]
+}
