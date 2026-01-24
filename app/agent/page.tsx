@@ -337,12 +337,11 @@ export default function AgentPage() {
           {sidebarOpen && (
             <>
               {/* New Chat Button */}
-              <div className="p-3 border-b border-border">
-                <Button
+              <div className="p-3">
+                <button
                   onClick={createNewChat}
-                  className="w-full justify-start gap-2"
-                  variant="outline"
                   disabled={isCreatingChat}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50"
                 >
                   {isCreatingChat ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -350,7 +349,7 @@ export default function AgentPage() {
                     <Plus className="w-4 h-4" />
                   )}
                   New Chat
-                </Button>
+                </button>
               </div>
 
               {/* Chat History */}
