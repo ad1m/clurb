@@ -3,7 +3,7 @@ import { xai } from "@ai-sdk/xai"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
 // @ts-expect-error - pdf-parse doesn't have type definitions
-import pdfParse from "pdf-parse/lib/pdf-parse.js"
+import pdfParse from "pdf-parse"
 
 export const maxDuration = 60
 
