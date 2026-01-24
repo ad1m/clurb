@@ -330,28 +330,45 @@ export default function AgentPage() {
         {/* Sidebar */}
         <div
           className={cn(
-            "border-r border-border bg-card/50 flex flex-col transition-all duration-300",
-            sidebarOpen ? "w-72" : "w-0"
+            "border-r border-border bg-card/50 flex flex-col transition-all duration-300 overflow-hidden",
+            sidebarOpen ? "w-72" : "w-14"
           )}
         >
+          {/* Sidebar Header - Always visible */}
+          <div className="p-3 flex items-center gap-2 border-b border-border">
+            {/* Sidebar Toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+            >
+              {sidebarOpen ? (
+                <PanelLeftClose className="w-5 h-5" />
+              ) : (
+                <PanelLeft className="w-5 h-5" />
+              )}
+            </Button>
+
+            {/* New Chat Button - only show when sidebar is open */}
+            {sidebarOpen && (
+              <button
+                onClick={createNewChat}
+                disabled={isCreatingChat}
+                className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-foreground bg-accent/30 hover:bg-accent/50 transition-colors disabled:opacity-50"
+              >
+                {isCreatingChat ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                New Chat
+              </button>
+            )}
+          </div>
+
           {sidebarOpen && (
             <>
-              {/* New Chat Button */}
-              <div className="p-3">
-                <button
-                  onClick={createNewChat}
-                  disabled={isCreatingChat}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50"
-                >
-                  {isCreatingChat ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Plus className="w-4 h-4" />
-                  )}
-                  New Chat
-                </button>
-              </div>
-
               {/* Chat History */}
               <ScrollArea className="flex-1">
                 <div className="p-2">
@@ -421,20 +438,6 @@ export default function AgentPage() {
 
         {/* Main Chat Area */}
         <main className="flex-1 flex flex-col max-w-3xl mx-auto w-full px-4">
-          {/* Sidebar Toggle */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute left-4 top-20 z-10"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-          >
-            {sidebarOpen ? (
-              <PanelLeftClose className="w-5 h-5" />
-            ) : (
-              <PanelLeft className="w-5 h-5" />
-            )}
-          </Button>
-
           {messages.length === 0 ? (
             /* Empty State */
             <div className="flex-1 flex flex-col items-center justify-center py-12">
