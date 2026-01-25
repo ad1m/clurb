@@ -506,7 +506,7 @@ export async function POST(req: Request) {
     }),
 
     getBookContent: tool({
-      description: "Extract text content from a book/PDF for a specific page range. Use this when the user asks for a summary, explanation, or details about specific pages or content from a book.",
+      description: "Extract text content from a book/PDF for a specific page range. Use this when the user asks for a summary, explanation, or details about specific pages or content from a book. IMPORTANT: If you get a response with multiple matching books, ask the user to clarify which one they mean before calling this again.",
       parameters: z.object({
         bookTitle: z.string().describe("The title or partial title of the book to extract content from"),
         startPage: z.number().describe("The starting page number (1-indexed)"),
@@ -538,23 +538,89 @@ export async function POST(req: Request) {
           return { success: false, message: "No books in your library." }
         }
 
-        const { data: file } = await supabase
+        // Search for matching books (allow multiple matches)
+        const { data: matchingFiles } = await supabase
           .from("files")
           .select("id, title, file_url, total_pages, file_type")
           .ilike("title", `%${bookTitle}%`)
           .in("id", uniqueFileIds)
-          .limit(1)
-          .single()
 
-        if (!file) {
-          return { success: false, message: `Could not find a book matching "${bookTitle}" in your library.` }
+        if (!matchingFiles || matchingFiles.length === 0) {
+          // Try a more flexible search by splitting the search term
+          const searchWords = bookTitle.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+
+          // Get all user's files and do a manual fuzzy match
+          const { data: allFiles } = await supabase
+            .from("files")
+            .select("id, title, file_url, total_pages, file_type")
+            .in("id", uniqueFileIds)
+
+          const fuzzyMatches = allFiles?.filter(f => {
+            const titleLower = f.title.toLowerCase()
+            // Match if any search word is found in the title
+            return searchWords.some(word => titleLower.includes(word))
+          }) || []
+
+          if (fuzzyMatches.length === 0) {
+            return {
+              success: false,
+              message: `Could not find a book matching "${bookTitle}" in your library. Use getUserBooks to see all available books.`
+            }
+          }
+
+          if (fuzzyMatches.length > 1) {
+            return {
+              success: false,
+              needsClarification: true,
+              message: `Found ${fuzzyMatches.length} books that might match "${bookTitle}". Please ask the user which one they mean:`,
+              matchingBooks: fuzzyMatches.map(f => ({ title: f.title, totalPages: f.total_pages })),
+            }
+          }
+
+          // Single fuzzy match found
+          const file = fuzzyMatches[0]
+          if (file.file_type !== "application/pdf") {
+            return { success: false, message: "Content extraction is only supported for PDF files." }
+          }
+
+          try {
+            console.log(`Fetching PDF from: ${file.file_url}`)
+            const text = await extractPdfText(file.file_url, startPage, actualEndPage)
+            return {
+              success: true,
+              bookTitle: file.title,
+              totalPages: file.total_pages,
+              extractedPages: { start: startPage, end: actualEndPage },
+              content: text,
+            }
+          } catch (error) {
+            console.error("PDF extraction failed for URL:", file.file_url)
+            return {
+              success: false,
+              message: `Failed to extract content from "${file.title}": ${error instanceof Error ? error.message : "Unknown error"}`,
+            }
+          }
         }
+
+        // Multiple matches - ask for clarification
+        if (matchingFiles.length > 1) {
+          return {
+            success: false,
+            needsClarification: true,
+            message: `Found ${matchingFiles.length} books that might match "${bookTitle}". Please ask the user which one they mean:`,
+            matchingBooks: matchingFiles.map(f => ({ title: f.title, totalPages: f.total_pages })),
+          }
+        }
+
+        // Single match found
+        const file = matchingFiles[0]
 
         if (file.file_type !== "application/pdf") {
           return { success: false, message: "Content extraction is only supported for PDF files." }
         }
 
         try {
+          console.log(`Fetching PDF from: ${file.file_url}`)
           const text = await extractPdfText(file.file_url, startPage, actualEndPage)
           return {
             success: true,
@@ -564,9 +630,10 @@ export async function POST(req: Request) {
             content: text,
           }
         } catch (error) {
+          console.error("PDF extraction failed for URL:", file.file_url)
           return {
             success: false,
-            message: `Failed to extract content from the PDF: ${error instanceof Error ? error.message : "Unknown error"}`,
+            message: `Failed to extract content from "${file.title}": ${error instanceof Error ? error.message : "Unknown error"}`,
           }
         }
       },
@@ -596,6 +663,8 @@ IMPORTANT INSTRUCTIONS:
 - When asked about charts or visualizations, use getDailyReadingStats
 - When asked about friends reading something, use getFriendsReadingBook
 - You CAN summarize book content because you have access to the actual PDF text through getBookContent
+- If getBookContent returns needsClarification=true with multiple matching books, present the list to the user and ask them to specify which book they want. Then call getBookContent again with the exact title they choose.
+- When users mention a partial book name (like "Harry Potter"), match it to books in their library. If multiple matches exist, always ask for clarification.
 
 Be conversational and friendly. Use specific numbers and page counts when available.
 Keep responses concise and helpful. Don't explain what tools you're using - just provide the answer.`
