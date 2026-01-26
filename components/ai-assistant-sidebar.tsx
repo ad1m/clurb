@@ -16,12 +16,12 @@ import {
   Maximize2,
   Minimize2,
   StickyNote,
-  ChevronDown,
   ChevronLeft,
   Plus,
   MessageSquare,
   Trash2,
   History,
+  Quote,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -58,15 +58,14 @@ export function AIAssistantSidebar({
   onCreateStickyNote,
 }: AIAssistantSidebarProps) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const [showFullText, setShowFullText] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [chats, setChats] = useState<Chat[]>([])
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [currentHighlight, setCurrentHighlight] = useState<string | null>(null)
   const [isLoadingChats, setIsLoadingChats] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
+  const [isLoadingFromDb, setIsLoadingFromDb] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const lastSavedMessageCountRef = useRef<number>(0)
 
   const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages, append } = useChat({
     api: "/api/highlight-ai",
@@ -113,54 +112,63 @@ export function AIAssistantSidebar({
     }
   }, [isOpen, fetchChats])
 
-  // Handle new highlighted text - add to current context without resetting
+  // Handle new highlighted text - set it as pending context for new messages
   useEffect(() => {
     if (selectedText && selectedText !== currentHighlight) {
-      setCurrentHighlight(selectedText)
-      // Don't reset messages - keep conversation history
-      // The highlighted text will be added to system prompt context
-    }
-  }, [selectedText, currentHighlight])
-
-  // Save messages to current chat
-  const saveMessages = useCallback(async () => {
-    if (!currentChatId || messages.length === 0 || isSaving) return
-
-    setIsSaving(true)
-    try {
-      // Only save the last two messages (user + assistant response)
-      const lastUserIdx = messages.findLastIndex(m => m.role === "user")
-      if (lastUserIdx >= 0) {
-        const newMessages = messages.slice(lastUserIdx).filter(m =>
-          typeof m.content === "string" && m.content.trim().length > 0
-        )
-        if (newMessages.length > 0) {
-          await fetch("/api/assistant-chats/messages", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chatId: currentChatId,
-              messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-            }),
-          })
-        }
+      // Only set highlight if we're starting fresh (no messages yet)
+      // or if we want to add new context to the conversation
+      if (messages.length === 0) {
+        setCurrentHighlight(selectedText)
+      } else {
+        // If there are already messages, add the new highlight as context
+        // but don't show the preview box - it will be included in the next message
+        setCurrentHighlight(selectedText)
       }
+    }
+  }, [selectedText, currentHighlight, messages.length])
+
+  // Clear the highlight preview after first message is sent
+  // The highlight is already in the system prompt context
+  useEffect(() => {
+    if (messages.length > 0 && currentHighlight) {
+      // After the first user message, clear the visible highlight
+      // The context is still in the system prompt
+      setCurrentHighlight(null)
+    }
+  }, [messages.length, currentHighlight])
+
+  // Save NEW messages to current chat (only messages that weren't loaded from DB)
+  const saveNewMessages = useCallback(async (messagesToSave: typeof messages) => {
+    if (!currentChatId || messagesToSave.length === 0 || isLoadingFromDb) return
+
+    try {
+      await fetch("/api/assistant-chats/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId: currentChatId,
+          messages: messagesToSave.map(m => ({ role: m.role, content: m.content })),
+        }),
+      })
     } catch (error) {
       console.error("Failed to save messages:", error)
-    } finally {
-      setIsSaving(false)
     }
-  }, [currentChatId, messages, isSaving])
+  }, [currentChatId, isLoadingFromDb])
 
-  // Auto-save when assistant finishes responding
+  // Auto-save when assistant finishes responding (only new messages)
   useEffect(() => {
-    if (!isLoading && messages.length > 0 && currentChatId) {
+    if (!isLoading && messages.length > 0 && currentChatId && !isLoadingFromDb) {
       const lastMessage = messages[messages.length - 1]
-      if (lastMessage.role === "assistant") {
-        saveMessages()
+      if (lastMessage.role === "assistant" && messages.length > lastSavedMessageCountRef.current) {
+        // Only save messages that are new since last save
+        const newMessages = messages.slice(lastSavedMessageCountRef.current)
+        if (newMessages.length > 0) {
+          saveNewMessages(newMessages)
+          lastSavedMessageCountRef.current = messages.length
+        }
       }
     }
-  }, [isLoading, messages, currentChatId, saveMessages])
+  }, [isLoading, messages, currentChatId, isLoadingFromDb, saveNewMessages])
 
   // Auto-generate chat title from first message
   const updateChatTitle = useCallback(async (chatId: string, firstMessage: string) => {
@@ -179,47 +187,40 @@ export function AIAssistantSidebar({
 
   // Create new chat session
   const handleNewChat = async () => {
-    try {
-      const res = await fetch("/api/assistant-chats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileId,
-          title: "New Chat",
-          highlightedText: currentHighlight,
-          pageNumber,
-        }),
-      })
-      const data = await res.json()
-      if (data.chat) {
-        setChats(prev => [data.chat, ...prev])
-        setCurrentChatId(data.chat.id)
-        setMessages([])
-        setShowHistory(false)
-      }
-    } catch (error) {
-      console.error("Failed to create chat:", error)
-    }
+    setCurrentChatId(null)
+    setMessages([])
+    setCurrentHighlight(null)
+    lastSavedMessageCountRef.current = 0
+    setShowHistory(false)
   }
 
   // Load a chat from history
   const handleLoadChat = async (chat: Chat) => {
+    setIsLoadingFromDb(true)
     setCurrentChatId(chat.id)
-    setCurrentHighlight(chat.highlighted_text || null)
+    setCurrentHighlight(null) // Don't show old highlight, it's in the messages
     setShowHistory(false)
 
     try {
       const res = await fetch(`/api/assistant-chats/messages?chatId=${chat.id}`)
       const data = await res.json()
       if (data.messages) {
-        setMessages(data.messages.map((m: { id: string; role: string; content: string }) => ({
+        const loadedMessages = data.messages.map((m: { id: string; role: string; content: string }) => ({
           id: m.id,
           role: m.role as "user" | "assistant",
           content: m.content,
-        })))
+        }))
+        setMessages(loadedMessages)
+        // Mark all loaded messages as "saved" so we don't re-save them
+        lastSavedMessageCountRef.current = loadedMessages.length
       }
     } catch (error) {
       console.error("Failed to load messages:", error)
+    } finally {
+      // Small delay to ensure state is set before allowing saves
+      setTimeout(() => {
+        setIsLoadingFromDb(false)
+      }, 100)
     }
   }
 
@@ -232,6 +233,7 @@ export function AIAssistantSidebar({
       if (currentChatId === chatId) {
         setCurrentChatId(null)
         setMessages([])
+        lastSavedMessageCountRef.current = 0
       }
     } catch (error) {
       console.error("Failed to delete chat:", error)
@@ -239,8 +241,9 @@ export function AIAssistantSidebar({
   }
 
   const handleQuickAction = async (action: (typeof QUICK_ACTIONS)[0]) => {
-    // If no current chat, create one first
-    if (!currentChatId) {
+    // Create a new chat if needed
+    let chatId = currentChatId
+    if (!chatId) {
       try {
         const res = await fetch("/api/assistant-chats", {
           method: "POST",
@@ -256,9 +259,12 @@ export function AIAssistantSidebar({
         if (data.chat) {
           setChats(prev => [data.chat, ...prev])
           setCurrentChatId(data.chat.id)
+          chatId = data.chat.id
+          lastSavedMessageCountRef.current = 0
         }
       } catch (error) {
         console.error("Failed to create chat:", error)
+        return
       }
     }
 
@@ -272,7 +278,7 @@ export function AIAssistantSidebar({
     e.preventDefault()
     if (!input.trim()) return
 
-    // If no current chat, create one first
+    // Create a new chat if needed
     if (!currentChatId) {
       try {
         const res = await fetch("/api/assistant-chats", {
@@ -289,9 +295,11 @@ export function AIAssistantSidebar({
         if (data.chat) {
           setChats(prev => [data.chat, ...prev])
           setCurrentChatId(data.chat.id)
+          lastSavedMessageCountRef.current = 0
         }
       } catch (error) {
         console.error("Failed to create chat:", error)
+        return
       }
     } else if (messages.length === 0) {
       // Update title with first message
@@ -303,12 +311,15 @@ export function AIAssistantSidebar({
 
   const handleCreateNote = (messageContent: string) => {
     if (onCreateStickyNote) {
-      const title = currentHighlight?.slice(0, 50) || "AI Response"
-      onCreateStickyNote(title + (currentHighlight && currentHighlight.length > 50 ? "..." : ""), messageContent)
+      const title = "AI Response"
+      onCreateStickyNote(title, messageContent)
     }
   }
 
   if (!isOpen) return null
+
+  // Check if we should show the highlight preview (only before first message)
+  const showHighlightPreview = currentHighlight && messages.length === 0
 
   return (
     <>
@@ -452,59 +463,8 @@ export function AIAssistantSidebar({
           </div>
         ) : (
           <>
-            {/* Selected Text Preview */}
-            {currentHighlight && (
-              <div className="px-4 py-3 border-b border-border bg-muted/30 shrink-0">
-                <div
-                  className={cn(
-                    "bg-card rounded-lg p-3 border border-border transition-all",
-                    !showFullText && "max-h-24 overflow-hidden relative"
-                  )}
-                >
-                  <p className="text-sm text-muted-foreground italic leading-relaxed">"{currentHighlight}"</p>
-                  {!showFullText && currentHighlight.length > 200 && (
-                    <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card to-transparent" />
-                  )}
-                </div>
-                {currentHighlight.length > 200 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="mt-2 text-xs gap-1"
-                    onClick={() => setShowFullText(!showFullText)}
-                  >
-                    <ChevronDown className={cn("w-3 h-3 transition-transform", showFullText && "rotate-180")} />
-                    {showFullText ? "Show less" : "Show full text"}
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {/* Quick Actions */}
-            {currentHighlight && messages.length === 0 && (
-              <div className="px-4 py-3 border-b border-border shrink-0">
-                <p className="text-xs text-muted-foreground mb-2">Quick actions</p>
-                <div className="flex gap-2">
-                  {QUICK_ACTIONS.map((action) => (
-                    <Button
-                      key={action.label}
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 text-xs gap-1.5"
-                      onClick={() => handleQuickAction(action)}
-                      disabled={isLoading}
-                    >
-                      <action.icon className="w-3.5 h-3.5" />
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Messages - Scrollable Area */}
             <div
-              ref={messagesContainerRef}
               className="flex-1 overflow-y-auto min-h-0"
               style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
             >
@@ -514,7 +474,8 @@ export function AIAssistantSidebar({
                 }
               `}</style>
               <div className="p-4 space-y-4">
-                {messages.length === 0 && !currentHighlight && (
+                {/* Empty state */}
+                {messages.length === 0 && !showHighlightPreview && (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
                     <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
                       <Sparkles className="w-8 h-8 text-primary" />
@@ -526,14 +487,47 @@ export function AIAssistantSidebar({
                   </div>
                 )}
 
-                {messages.length === 0 && currentHighlight && (
-                  <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Choose a quick action above or ask a question below
-                    </p>
+                {/* Highlighted text preview - only shown before first message */}
+                {showHighlightPreview && (
+                  <div className="space-y-4">
+                    {/* Context card */}
+                    <div className="bg-primary/5 border border-primary/20 rounded-xl p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                          <Quote className="w-4 h-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-primary mb-1">Selected text</p>
+                          <p className="text-sm text-muted-foreground leading-relaxed line-clamp-4">
+                            {currentHighlight}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quick actions */}
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-2">What would you like to do?</p>
+                      <div className="flex flex-wrap gap-2">
+                        {QUICK_ACTIONS.map((action) => (
+                          <Button
+                            key={action.label}
+                            variant="outline"
+                            size="sm"
+                            className="text-xs gap-1.5"
+                            onClick={() => handleQuickAction(action)}
+                            disabled={isLoading}
+                          >
+                            <action.icon className="w-3.5 h-3.5" />
+                            {action.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
 
+                {/* Messages */}
                 {messages
                   .filter((m) => {
                     if (m.role === "user") return true
@@ -602,7 +596,7 @@ export function AIAssistantSidebar({
                 <Input
                   value={input}
                   onChange={handleInputChange}
-                  placeholder={currentHighlight ? "Ask about this text..." : "Ask anything..."}
+                  placeholder={showHighlightPreview ? "Ask about this text..." : "Ask anything..."}
                   className="flex-1"
                   disabled={isLoading}
                 />
