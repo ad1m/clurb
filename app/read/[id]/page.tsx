@@ -1,19 +1,19 @@
 "use client"
 
-import { useEffect, useState, useCallback, use } from "react"
+import { useEffect, useState, useCallback, useRef, use } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import type { File, FileMember, Profile, StickyNote as StickyNoteType, ReadingProgress } from "@/lib/types"
 import { PDFViewer } from "@/components/pdf-viewer"
-import { StickyNote } from "@/components/sticky-note"
-import { StickyNoteCreator } from "@/components/sticky-note-creator"
+import { Sticker } from "@/components/sticker"
+import { StickerCreator, QuickStickerCreator } from "@/components/sticker-creator"
 import { ReaderSidebar } from "@/components/reader-sidebar"
 import { ChatPanel } from "@/components/chat-panel"
-import { AIHighlightPopup } from "@/components/ai-highlight-popup"
+import { AIAssistantSidebar } from "@/components/ai-assistant-sidebar"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
-import { BookOpen, ArrowLeft, Loader2, MessageSquare, PanelRightClose, PanelRight } from "lucide-react"
+import { BookOpen, ArrowLeft, Loader2, MessageSquare, PanelRightClose, PanelRight, Sparkles } from "lucide-react"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -30,9 +30,11 @@ export default function ReadPage({ params }: PageProps) {
   const [isCreatingNote, setIsCreatingNote] = useState(false)
   const [showSidebar, setShowSidebar] = useState(true)
   const [showChat, setShowChat] = useState(false)
+  const [showAIAssistant, setShowAIAssistant] = useState(false)
   const [onlineUsers, setOnlineUsers] = useState<string[]>([])
   const [selectedText, setSelectedText] = useState<string | null>(null)
-  const [highlightPosition, setHighlightPosition] = useState({ x: 0, y: 0 })
+  const [quickStickerData, setQuickStickerData] = useState<{ title: string; content: string } | null>(null)
+  const pageContainerRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()
@@ -120,7 +122,7 @@ export default function ReadPage({ params }: PageProps) {
 
   useEffect(() => {
     fetchData()
-    
+
     // Set up presence tracking
     if (currentUserId && fileId) {
       const presenceChannel = supabase.channel(`presence:file:${fileId}`, {
@@ -186,7 +188,7 @@ export default function ReadPage({ params }: PageProps) {
     return () => clearTimeout(debounce)
   }, [currentPage, currentUserId, fileId, supabase])
 
-  const handleCreateNote = async (content: string, color: string, x: number, y: number) => {
+  const handleCreateSticker = async (title: string, content: string, metadata: string, x: number, y: number) => {
     if (!currentUserId) return
 
     setIsCreatingNote(true)
@@ -197,8 +199,8 @@ export default function ReadPage({ params }: PageProps) {
           file_id: fileId,
           author_id: currentUserId,
           page_number: currentPage,
-          content,
-          color,
+          content: title ? `${title}\n\n${content}` : content,
+          color: metadata, // Store icon:shape:color metadata in color field
           position_x: x,
           position_y: y,
           is_surprise: true,
@@ -219,17 +221,18 @@ export default function ReadPage({ params }: PageProps) {
       })
 
       toast({
-        title: "Note added",
-        description: "Your friends will discover this note when they reach this page!",
+        title: "Sticker added",
+        description: "Your friends will discover this when they reach this page!",
       })
     } catch {
       toast({
-        title: "Failed to create note",
-        description: "There was an error saving your note.",
+        title: "Failed to create sticker",
+        description: "There was an error saving your sticker.",
         variant: "destructive",
       })
     } finally {
       setIsCreatingNote(false)
+      setQuickStickerData(null)
     }
   }
 
@@ -237,13 +240,24 @@ export default function ReadPage({ params }: PageProps) {
     try {
       await supabase.from("sticky_notes").delete().eq("id", noteId)
       setStickyNotes((prev) => prev.filter((n) => n.id !== noteId))
-      toast({ title: "Note deleted" })
+      toast({ title: "Sticker deleted" })
     } catch {
       toast({
         title: "Failed to delete",
-        description: "There was an error deleting your note.",
+        description: "There was an error deleting your sticker.",
         variant: "destructive",
       })
+    }
+  }
+
+  const handleUpdateNotePosition = async (noteId: string, x: number, y: number) => {
+    try {
+      await supabase
+        .from("sticky_notes")
+        .update({ position_x: x, position_y: y })
+        .eq("id", noteId)
+    } catch {
+      console.error("Failed to update sticker position")
     }
   }
 
@@ -256,14 +270,13 @@ export default function ReadPage({ params }: PageProps) {
 
   const handleTextSelect = (text: string, page: number) => {
     if (text.length > 10) {
-      const selection = window.getSelection()
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0)
-        const rect = range.getBoundingClientRect()
-        setSelectedText(text)
-        setHighlightPosition({ x: rect.left, y: rect.bottom })
-      }
+      setSelectedText(text)
+      setShowAIAssistant(true)
     }
+  }
+
+  const handleCreateStickyFromAI = (title: string, content: string) => {
+    setQuickStickerData({ title, content })
   }
 
   if (isLoading) {
@@ -297,7 +310,17 @@ export default function ReadPage({ params }: PageProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          <StickyNoteCreator onCreateNote={handleCreateNote} isCreating={isCreatingNote} />
+          <StickerCreator onCreateSticker={handleCreateSticker} isCreating={isCreatingNote} />
+
+          <Button
+            variant={showAIAssistant ? "default" : "ghost"}
+            size="sm"
+            className="gap-2"
+            onClick={() => setShowAIAssistant(!showAIAssistant)}
+          >
+            <Sparkles className="w-4 h-4" />
+            AI Assistant
+          </Button>
 
           <Button
             variant={showChat ? "default" : "ghost"}
@@ -317,7 +340,7 @@ export default function ReadPage({ params }: PageProps) {
       {/* Main Content */}
       <div className="flex-1 flex min-h-0">
         {/* PDF Viewer */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0" ref={pageContainerRef}>
           <PDFViewer
             fileUrl={file.file_url}
             currentPage={currentPage}
@@ -325,15 +348,17 @@ export default function ReadPage({ params }: PageProps) {
             onTotalPagesChange={handleTotalPagesChange}
             onTextSelect={handleTextSelect}
           >
-            {/* Sticky Notes Overlay */}
+            {/* Stickers Overlay */}
             <div className="absolute inset-0 pointer-events-none">
               <div className="relative w-full h-full pointer-events-auto">
                 {stickyNotes.map((note) => (
-                  <StickyNote
+                  <Sticker
                     key={note.id}
                     note={note}
                     isOwn={note.author_id === currentUserId}
                     onDelete={() => handleDeleteNote(note.id)}
+                    onDragEnd={(x, y) => handleUpdateNotePosition(note.id, x, y)}
+                    containerRef={pageContainerRef}
                   />
                 ))}
               </div>
@@ -342,7 +367,7 @@ export default function ReadPage({ params }: PageProps) {
         </div>
 
         {/* Sidebar */}
-        {showSidebar && (
+        {showSidebar && !showAIAssistant && (
           <ReaderSidebar
             file={file}
             members={members}
@@ -356,14 +381,27 @@ export default function ReadPage({ params }: PageProps) {
         <ChatPanel fileId={fileId} currentUserId={currentUserId} isOpen={showChat} onClose={() => setShowChat(false)} />
       )}
 
-      {/* AI Highlight Popup */}
-      {selectedText && (
-        <AIHighlightPopup
-          selectedText={selectedText}
-          position={highlightPosition}
-          onClose={() => setSelectedText(null)}
-          fileId={fileId}
-          pageNumber={currentPage}
+      {/* AI Assistant Sidebar */}
+      <AIAssistantSidebar
+        isOpen={showAIAssistant}
+        onClose={() => {
+          setShowAIAssistant(false)
+          setSelectedText(null)
+        }}
+        selectedText={selectedText}
+        fileId={fileId}
+        pageNumber={currentPage}
+        onCreateStickyNote={handleCreateStickyFromAI}
+      />
+
+      {/* Quick Sticker Creator (from AI response) */}
+      {quickStickerData && (
+        <QuickStickerCreator
+          title={quickStickerData.title}
+          content={quickStickerData.content}
+          onCreateSticker={handleCreateSticker}
+          isCreating={isCreatingNote}
+          onClose={() => setQuickStickerData(null)}
         />
       )}
     </div>
