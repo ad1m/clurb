@@ -3,15 +3,15 @@
 import type React from "react"
 
 import { useState } from "react"
-import type { StickyNote as StickyNoteType, Profile } from "@/lib/types"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import type { StickyNote as StickyNoteType, User } from "@/lib/types"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { X, GripVertical } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatDistanceToNow } from "date-fns"
 
 interface StickyNoteProps {
-  note: StickyNoteType & { author?: Profile }
+  note: StickyNoteType & { author?: User }
   isOwn: boolean
   onDelete?: () => void
   containerRef?: React.RefObject<HTMLDivElement | null>
@@ -27,9 +27,9 @@ const STICKY_COLORS: Record<string, string> = {
 export function StickyNote({ note, isOwn, onDelete }: StickyNoteProps) {
   const [isExpanded, setIsExpanded] = useState(false)
 
-  const colorClass = STICKY_COLORS[note.color] || "bg-sticky-yellow"
+  const colorClass = STICKY_COLORS[note.color ?? ""] ?? "bg-sticky-yellow"
   const initials =
-    note.author?.display_name
+    note.author?.displayName
       ?.split(" ")
       .map((n) => n[0])
       .join("")
@@ -45,8 +45,8 @@ export function StickyNote({ note, isOwn, onDelete }: StickyNoteProps) {
         isExpanded ? "z-50 w-64" : "z-10 hover:z-20 hover:scale-105",
       )}
       style={{
-        left: `${note.position_x * 100}%`,
-        top: `${note.position_y * 100}%`,
+        left: `${(note.positionX ?? 0) * 100}%`,
+        top: `${(note.positionY ?? 0) * 100}%`,
         transform: "translate(-50%, -50%)",
       }}
       onClick={() => setIsExpanded(!isExpanded)}
@@ -56,11 +56,10 @@ export function StickyNote({ note, isOwn, onDelete }: StickyNoteProps) {
         <div className="flex items-center gap-2">
           <GripVertical className="w-3 h-3 text-black/30" />
           <Avatar className="w-5 h-5">
-            <AvatarImage src={note.author?.avatar_url || undefined} />
             <AvatarFallback className="text-[10px] bg-black/10">{initials}</AvatarFallback>
           </Avatar>
           <span className="text-xs font-medium text-black/70 truncate max-w-20">
-            {note.author?.display_name || note.author?.username}
+            {note.author?.displayName || note.author?.username}
           </span>
         </div>
         {isOwn && onDelete && (
@@ -82,7 +81,7 @@ export function StickyNote({ note, isOwn, onDelete }: StickyNoteProps) {
       <div className="p-3">
         <p className={cn("text-sm text-black/80 leading-relaxed", !isExpanded && "line-clamp-3")}>{note.content}</p>
         <p className="text-[10px] text-black/40 mt-2">
-          {formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}
+          {note.createdAt ? formatDistanceToNow(new Date(note.createdAt), { addSuffix: true }) : ""}
         </p>
       </div>
     </div>

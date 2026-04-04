@@ -1,90 +1,54 @@
-import { createClient } from "@/lib/supabase/server"
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
+import { getAuthUser } from "@/lib/auth"
+import { db } from "@/db"
+import { agentChats, agentMessages } from "@/db/schema"
+import { eq, and, asc } from "drizzle-orm"
 
-// GET - Get messages for a chat
-export async function GET(req: Request) {
-  const supabase = await createClient()
-  const { searchParams } = new URL(req.url)
-  const chatId = searchParams.get("chatId")
+// GET /api/assistant-chats/messages?chatId=xxx
+export async function GET(request: NextRequest) {
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  if (!chatId) {
-    return NextResponse.json({ error: "Missing chatId" }, { status: 400 })
-  }
+  const chatId = request.nextUrl.searchParams.get("chatId")
+  if (!chatId) return NextResponse.json({ error: "chatId required" }, { status: 400 })
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Verify ownership
+  const chat = db.select().from(agentChats).where(and(eq(agentChats.id, chatId), eq(agentChats.userId, auth.id))).get()
+  if (!chat) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  // First verify the chat belongs to the user
-  const { data: chat } = await supabase
-    .from("assistant_chats")
-    .select("id")
-    .eq("id", chatId)
-    .eq("user_id", user.id)
-    .single()
-
-  if (!chat) {
-    return NextResponse.json({ error: "Chat not found" }, { status: 404 })
-  }
-
-  const { data: messages, error } = await supabase
-    .from("assistant_messages")
-    .select("*")
-    .eq("chat_id", chatId)
-    .order("created_at", { ascending: true })
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  const messages = db
+    .select()
+    .from(agentMessages)
+    .where(eq(agentMessages.chatId, chatId))
+    .orderBy(asc(agentMessages.createdAt))
+    .all()
 
   return NextResponse.json({ messages })
 }
 
-// POST - Save messages to a chat
-export async function POST(req: Request) {
-  const supabase = await createClient()
-  const { chatId, messages } = await req.json()
+// POST /api/assistant-chats/messages  { chatId, messages: [{role, content}] }
+export async function POST(request: NextRequest) {
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  if (!chatId || !messages) {
-    return NextResponse.json({ error: "Missing chatId or messages" }, { status: 400 })
+  const { chatId, messages } = await request.json()
+  if (!chatId || !messages?.length) return NextResponse.json({ error: "chatId and messages required" }, { status: 400 })
+
+  // Verify ownership
+  const chat = db.select().from(agentChats).where(and(eq(agentChats.id, chatId), eq(agentChats.userId, auth.id))).get()
+  if (!chat) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  for (const msg of messages) {
+    db.insert(agentMessages).values({
+      id: crypto.randomUUID(),
+      chatId,
+      role: msg.role,
+      content: msg.content,
+    }).run()
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  // Verify the chat belongs to the user
-  const { data: chat } = await supabase
-    .from("assistant_chats")
-    .select("id")
-    .eq("id", chatId)
-    .eq("user_id", user.id)
-    .single()
-
-  if (!chat) {
-    return NextResponse.json({ error: "Chat not found" }, { status: 404 })
-  }
-
-  // Insert messages
-  const messagesToInsert = messages.map((m: { role: string; content: string }) => ({
-    chat_id: chatId,
-    role: m.role,
-    content: m.content,
-  }))
-
-  const { error } = await supabase.from("assistant_messages").insert(messagesToInsert)
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  // Update chat's updatedAt
+  db.update(agentChats).set({ updatedAt: new Date().toISOString() }).where(eq(agentChats.id, chatId)).run()
 
   return NextResponse.json({ success: true })
 }

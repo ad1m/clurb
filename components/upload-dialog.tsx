@@ -29,10 +29,10 @@ export function UploadDialog({ onUploadComplete }: UploadDialogProps) {
   const { toast } = useToast()
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0]
-    if (file) {
-      setFile(file)
-      setTitle(file.name.replace(/\.[^/.]+$/, ""))
+    const f = acceptedFiles[0]
+    if (f) {
+      setFile(f)
+      setTitle(f.name.replace(/\.[^/.]+$/, ""))
     }
   }, [])
 
@@ -40,83 +40,55 @@ export function UploadDialog({ onUploadComplete }: UploadDialogProps) {
     onDrop,
     accept: {
       "application/pdf": [".pdf"],
-      "application/epub+zip": [".epub"],
       "text/plain": [".txt"],
     },
     maxFiles: 1,
-    maxSize: 50 * 1024 * 1024, // 50MB - Vercel Blob supports large files
+    maxSize: 50 * 1024 * 1024,
   })
 
   const handleUpload = async () => {
     if (!file) return
 
     setIsUploading(true)
-    setUploadProgress(5)
+    setUploadProgress(10)
 
     try {
-      // Upload file using FormData with XMLHttpRequest for progress tracking
-      const blobUrl = await new Promise<string>((resolve, reject) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      formData.append("title", title || file.name.replace(/\.[^/.]+$/, ""))
+
+      await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
-        const formData = new FormData()
-        formData.append("file", file)
-        
+
         xhr.upload.addEventListener("progress", (e) => {
           if (e.lengthComputable) {
-            const percent = 5 + Math.round((e.loaded / e.total) * 75)
-            setUploadProgress(percent)
+            setUploadProgress(10 + Math.round((e.loaded / e.total) * 80))
           }
         })
 
         xhr.addEventListener("load", () => {
-          console.log("[v0] XHR status:", xhr.status)
-          console.log("[v0] XHR response:", xhr.responseText)
-          
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
-              const response = JSON.parse(xhr.responseText)
-              if (response.url) {
-                resolve(response.url)
-              } else {
-                reject(new Error(response.error || "Upload failed"))
-              }
-            } catch (parseError) {
-              console.error("[v0] JSON parse error:", parseError)
-              reject(new Error("Invalid server response: " + xhr.responseText.substring(0, 100)))
+              const data = JSON.parse(xhr.responseText)
+              if (data.success) resolve()
+              else reject(new Error(data.error || "Upload failed"))
+            } catch {
+              reject(new Error("Invalid server response"))
             }
           } else {
-            reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText.substring(0, 100)}`))
+            try {
+              const data = JSON.parse(xhr.responseText)
+              reject(new Error(data.error || `Upload failed (${xhr.status})`))
+            } catch {
+              reject(new Error(`Upload failed (${xhr.status})`))
+            }
           }
         })
 
         xhr.addEventListener("error", () => reject(new Error("Network error")))
-        xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")))
-
-        xhr.open("POST", "/api/blob-upload")
-        // Don't set Content-Type - let browser set it with boundary for multipart/form-data
+        xhr.open("POST", "/api/files/upload")
         xhr.send(formData)
       })
-
-      setUploadProgress(85)
-
-      // Save file metadata to database
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          blobUrl,
-          title: title || file.name.replace(/\.[^/.]+$/, ""),
-          fileName: file.name,
-          fileType: file.type,
-        }),
-      })
-
-      setUploadProgress(95)
-
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to save file")
-      }
 
       setUploadProgress(100)
 
@@ -125,7 +97,7 @@ export function UploadDialog({ onUploadComplete }: UploadDialogProps) {
         description: `"${title || file.name}" has been added to your library.`,
       })
 
-      await new Promise(resolve => setTimeout(resolve, 300))
+      await new Promise((r) => setTimeout(r, 300))
 
       setOpen(false)
       setFile(null)
@@ -133,22 +105,15 @@ export function UploadDialog({ onUploadComplete }: UploadDialogProps) {
       setUploadProgress(0)
       onUploadComplete?.()
     } catch (error) {
-      console.error("[v0] Upload error:", error)
       toast({
         title: "Upload failed",
-        description:
-          error instanceof Error ? error.message : "There was an error uploading your file. Please try again.",
+        description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       })
       setUploadProgress(0)
     } finally {
       setIsUploading(false)
     }
-  }
-
-  const clearFile = () => {
-    setFile(null)
-    setTitle("")
   }
 
   return (
@@ -161,9 +126,9 @@ export function UploadDialog({ onUploadComplete }: UploadDialogProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Upload a Document</DialogTitle>
-          <DialogDescription>Add a PDF or document to your library to share with friends.</DialogDescription>
+          <DialogDescription>Add a PDF or text file to your library.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4 overflow-hidden">
+        <div className="space-y-4 py-4">
           {!file ? (
             <div
               {...getRootProps()}
@@ -176,18 +141,18 @@ export function UploadDialog({ onUploadComplete }: UploadDialogProps) {
               <p className="text-sm font-medium mb-1">
                 {isDragActive ? "Drop your file here..." : "Drag & drop your file here"}
               </p>
-              <p className="text-xs text-muted-foreground">or click to browse (PDF, EPUB, TXT - max 50MB)</p>
+              <p className="text-xs text-muted-foreground">or click to browse (PDF, TXT — max 50MB)</p>
             </div>
           ) : (
-            <div className="flex items-center gap-3 p-3 bg-secondary rounded-xl overflow-hidden">
+            <div className="flex items-center gap-3 p-3 bg-secondary rounded-xl">
               <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
                 <FileText className="w-5 h-5 text-primary" />
               </div>
-              <div className="flex-1 min-w-0 overflow-hidden">
+              <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{file.name}</p>
                 <p className="text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
-              <Button variant="ghost" size="icon" onClick={clearFile} className="shrink-0">
+              <Button variant="ghost" size="icon" onClick={() => { setFile(null); setTitle("") }}>
                 <X className="w-4 h-4" />
               </Button>
             </div>

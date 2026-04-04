@@ -1,96 +1,89 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
-import type { File } from "@/lib/types"
-import { FileText, Users, Loader2 } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import type { ClurbFile } from "@/lib/types"
+import { FileText, Loader2 } from "lucide-react"
 import Link from "next/link"
-import { createClient } from "@/lib/supabase/client"
 import { FileActionsMenu } from "./file-actions-menu"
 import { pdfjs } from "react-pdf"
 
-// PDF.js worker configuration - using unpkg CDN
 if (typeof window !== "undefined") {
   pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 }
 
 interface FileCardProps {
-  file: File
-  memberCount?: number
+  file: ClurbFile
   currentPage?: number
   onUpdate?: () => void
 }
 
-export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileCardProps) {
-  const progress = currentPage && file.total_pages ? Math.round((currentPage / file.total_pages) * 100) : 0
-  const [coverUrl, setCoverUrl] = useState<string | null>(file.cover_image_url || null)
+export function FileCard({ file, currentPage, onUpdate }: FileCardProps) {
+  const progress =
+    currentPage && file.totalPages ? Math.round((currentPage / file.totalPages) * 100) : 0
+  const [coverUrl, setCoverUrl] = useState<string | null>(file.coverImageUrl || null)
   const [isGenerating, setIsGenerating] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const supabase = createClient()
-
-  const generateCover = useCallback(async () => {
-    if (coverUrl || isGenerating || !file.file_url) return
-
-    setIsGenerating(true)
-    try {
-      const loadingTask = pdfjs.getDocument(file.file_url)
-      const pdf = await loadingTask.promise
-      const page = await pdf.getPage(1)
-
-      const scale = 0.5
-      const viewport = page.getViewport({ scale })
-
-      const canvas = canvasRef.current
-      if (!canvas) return
-
-      const context = canvas.getContext("2d")
-      if (!context) return
-
-      canvas.height = viewport.height
-      canvas.width = viewport.width
-
-      await page.render({
-        canvasContext: context,
-        viewport: viewport,
-        canvas: canvas,
-      }).promise
-
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.7)
-      setCoverUrl(dataUrl)
-
-      supabase.from("files").update({ cover_image_url: dataUrl }).eq("id", file.id).then(() => {})
-    } catch (error) {
-      console.error("[v0] Failed to generate cover:", error)
-    } finally {
-      setIsGenerating(false)
-    }
-  }, [coverUrl, isGenerating, file.file_url, file.id, supabase])
+  const hasStartedRef = useRef(false)
 
   useEffect(() => {
-    if (!coverUrl && file.file_url && file.file_type === "application/pdf") {
-      generateCover()
+    if (coverUrl || hasStartedRef.current || !file.fileUrl || file.fileType !== "application/pdf") return
+    hasStartedRef.current = true
+    setIsGenerating(true)
+
+    const loadingTask = pdfjs.getDocument(file.fileUrl)
+    let cancelled = false
+
+    loadingTask.promise
+      .then((pdf) => pdf.getPage(1))
+      .then((page) => {
+        if (cancelled) return
+        const viewport = page.getViewport({ scale: 0.5 })
+        const canvas = canvasRef.current
+        if (!canvas) return
+        const context = canvas.getContext("2d")
+        if (!context) return
+        canvas.height = viewport.height
+        canvas.width = viewport.width
+        return page.render({ canvas, canvasContext: context, viewport }).promise.then(() => {
+          if (cancelled) return
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.7)
+          setCoverUrl(dataUrl)
+          fetch(`/api/files/${file.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ coverImageUrl: dataUrl }),
+          }).catch(() => {})
+        })
+      })
+      .catch((error) => {
+        if (!cancelled) console.error("[file-card] cover gen failed:", error)
+      })
+      .finally(() => {
+        if (!cancelled) setIsGenerating(false)
+      })
+
+    return () => {
+      cancelled = true
+      loadingTask.destroy().catch(() => {})
     }
-  }, [coverUrl, file.file_url, file.file_type, generateCover])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <Link href={`/read/${file.id}`} className="group block">
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Cover Image - poster style with rounded corners */}
       <div className="aspect-[3/4] relative rounded-xl overflow-hidden bg-muted">
-        {/* Actions menu in top right */}
         <div
           className="absolute top-2 right-2 z-10"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
         >
           <FileActionsMenu fileId={file.id} fileName={file.title} onUpdate={() => onUpdate?.()} />
         </div>
 
         {coverUrl ? (
           <img
-            src={coverUrl || "/placeholder.svg"}
+            src={coverUrl}
             alt={file.title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
@@ -104,30 +97,20 @@ export function FileCard({ file, memberCount = 0, currentPage, onUpdate }: FileC
           </div>
         )}
 
-        {/* Progress bar at bottom of image */}
         {progress > 0 && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
             <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
           </div>
         )}
-
-        {/* Member count badge */}
-        {memberCount > 1 && (
-          <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-black/70 text-white text-xs px-2 py-1 rounded-md">
-            <Users className="w-3 h-3" />
-            {memberCount}
-          </div>
-        )}
       </div>
 
-      {/* Title below image */}
       <div className="mt-2 px-1">
         <h3 className="font-medium text-sm text-foreground group-hover:text-primary transition-colors line-clamp-2 text-center">
           {file.title}
         </h3>
-        {file.total_pages > 0 && currentPage && (
+        {(file.totalPages ?? 0) > 0 && currentPage && (
           <p className="text-xs text-muted-foreground mt-0.5 text-center">
-            Page {currentPage} of {file.total_pages}
+            Page {currentPage} of {file.totalPages}
           </p>
         )}
       </div>

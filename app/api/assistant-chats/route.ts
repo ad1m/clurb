@@ -1,126 +1,78 @@
-import { createClient } from "@/lib/supabase/server"
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
+import { getAuthUser } from "@/lib/auth"
+import { db } from "@/db"
+import { agentChats } from "@/db/schema"
+import { eq, and, desc } from "drizzle-orm"
 
-// GET - List all chats for a specific file
-export async function GET(req: Request) {
-  const supabase = await createClient()
-  const { searchParams } = new URL(req.url)
-  const fileId = searchParams.get("fileId")
+// GET /api/assistant-chats?fileId=xxx
+export async function GET(request: NextRequest) {
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const fileId = request.nextUrl.searchParams.get("fileId")
+  if (!fileId) return NextResponse.json({ chats: [] })
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  let query = supabase
-    .from("assistant_chats")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false })
-
-  if (fileId) {
-    query = query.eq("file_id", fileId)
-  }
-
-  const { data: chats, error } = await query
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  const chats = db
+    .select()
+    .from(agentChats)
+    .where(and(eq(agentChats.userId, auth.id), eq(agentChats.fileId, fileId)))
+    .orderBy(desc(agentChats.updatedAt))
+    .all()
 
   return NextResponse.json({ chats })
 }
 
-// POST - Create a new chat
-export async function POST(req: Request) {
-  const supabase = await createClient()
-  const { fileId, title, highlightedText, pageNumber } = await req.json()
+// POST /api/assistant-chats  { fileId, title, highlightedText?, pageNumber? }
+export async function POST(request: NextRequest) {
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { fileId, title } = await request.json()
+  if (!fileId) return NextResponse.json({ error: "fileId required" }, { status: 400 })
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const id = crypto.randomUUID()
+  const now = new Date().toISOString()
 
-  const { data: chat, error } = await supabase
-    .from("assistant_chats")
-    .insert({
-      user_id: user.id,
-      file_id: fileId,
-      title: title || "New Chat",
-      highlighted_text: highlightedText || null,
-      page_number: pageNumber || null,
-    })
-    .select()
-    .single()
+  db.insert(agentChats).values({
+    id,
+    userId: auth.id,
+    fileId,
+    title: title || "New Chat",
+    createdAt: now,
+    updatedAt: now,
+  }).run()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
+  const chat = db.select().from(agentChats).where(eq(agentChats.id, id)).get()
   return NextResponse.json({ chat })
 }
 
-// DELETE - Delete a chat
-export async function DELETE(req: Request) {
-  const supabase = await createClient()
-  const { searchParams } = new URL(req.url)
-  const chatId = searchParams.get("chatId")
+// PATCH /api/assistant-chats  { chatId, title }
+export async function PATCH(request: NextRequest) {
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  if (!chatId) {
-    return NextResponse.json({ error: "Missing chatId" }, { status: 400 })
-  }
+  const { chatId, title } = await request.json()
+  if (!chatId || !title) return NextResponse.json({ error: "chatId and title required" }, { status: 400 })
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const { error } = await supabase.from("assistant_chats").delete().eq("id", chatId).eq("user_id", user.id)
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  db.update(agentChats)
+    .set({ title, updatedAt: new Date().toISOString() })
+    .where(and(eq(agentChats.id, chatId), eq(agentChats.userId, auth.id)))
+    .run()
 
   return NextResponse.json({ success: true })
 }
 
-// PATCH - Update chat title
-export async function PATCH(req: Request) {
-  const supabase = await createClient()
-  const { chatId, title } = await req.json()
+// DELETE /api/assistant-chats?chatId=xxx
+export async function DELETE(request: NextRequest) {
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  if (!chatId) {
-    return NextResponse.json({ error: "Missing chatId" }, { status: 400 })
-  }
+  const chatId = request.nextUrl.searchParams.get("chatId")
+  if (!chatId) return NextResponse.json({ error: "chatId required" }, { status: 400 })
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  db.delete(agentChats)
+    .where(and(eq(agentChats.id, chatId), eq(agentChats.userId, auth.id)))
+    .run()
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const { data: chat, error } = await supabase
-    .from("assistant_chats")
-    .update({ title })
-    .eq("id", chatId)
-    .eq("user_id", user.id)
-    .select()
-    .single()
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ chat })
+  return NextResponse.json({ success: true })
 }

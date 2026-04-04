@@ -1,10 +1,11 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import type { StickyNote as StickyNoteType, Profile } from "@/lib/types"
+import type { StickyNote } from "@/lib/types"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { X, Calendar } from "lucide-react"
+import { X, MoreHorizontal, Trash2, Calendar } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatDistanceToNow } from "date-fns"
 
@@ -41,199 +42,232 @@ export const STICKER_COLORS = [
 ]
 
 interface StickerProps {
-  note: StickyNoteType & { author?: Profile }
+  note: StickyNote
   isOwn: boolean
   onDelete?: () => void
+  onUpdate?: (id: string, color: string) => void
   onDragEnd?: (x: number, y: number) => void
   containerRef?: React.RefObject<HTMLDivElement | null>
-  scale?: number
 }
 
-export function Sticker({ note, isOwn, onDelete, onDragEnd, containerRef, scale = 1 }: StickerProps) {
+export function Sticker({ note, isOwn, onDelete, onUpdate, onDragEnd, containerRef }: StickerProps) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const [isDragging, setIsDragging] = useState(false)
-  const [position, setPosition] = useState({ x: note.position_x, y: note.position_y })
+  const [position, setPosition] = useState({ x: note.positionX ?? 0.5, y: note.positionY ?? 0.5 })
+  const [metadata, setMetadata] = useState(() => parseNoteMetadata(note.color || ""))
   const stickerRef = useRef<HTMLDivElement>(null)
-  const dragStartRef = useRef({ x: 0, y: 0, posX: 0, posY: 0 })
+  const isDraggingRef = useRef(false)
+  const dragStateRef = useRef({ startMouseX: 0, startMouseY: 0, startPosX: 0, startPosY: 0, curX: 0, curY: 0 })
 
-  // Parse metadata from note (icon, shape, color)
-  const metadata = parseNoteMetadata(note.color)
-
-  // Handle drag start
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!isOwn || isExpanded) return
     e.preventDefault()
-    setIsDragging(true)
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      posX: position.x,
-      posY: position.y,
+    e.stopPropagation()
+    isDraggingRef.current = true
+    dragStateRef.current = {
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startPosX: position.x,
+      startPosY: position.y,
+      curX: position.x,
+      curY: position.y,
+    }
+    if (stickerRef.current) {
+      stickerRef.current.style.zIndex = "50"
+      stickerRef.current.style.cursor = "grabbing"
     }
   }
 
-  // Handle drag move
   useEffect(() => {
-    if (!isDragging || !containerRef?.current) return
-
     const handleMouseMove = (e: MouseEvent) => {
-      const container = containerRef.current
-      if (!container) return
-
-      const rect = container.getBoundingClientRect()
-      const deltaX = (e.clientX - dragStartRef.current.x) / rect.width / scale
-      const deltaY = (e.clientY - dragStartRef.current.y) / rect.height / scale
-
-      const newX = Math.max(0.05, Math.min(0.95, dragStartRef.current.posX + deltaX))
-      const newY = Math.max(0.05, Math.min(0.95, dragStartRef.current.posY + deltaY))
-
-      setPosition({ x: newX, y: newY })
+      if (!isDraggingRef.current || !containerRef?.current || !stickerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const deltaX = (e.clientX - dragStateRef.current.startMouseX) / rect.width
+      const deltaY = (e.clientY - dragStateRef.current.startMouseY) / rect.height
+      const newX = Math.max(0.05, Math.min(0.95, dragStateRef.current.startPosX + deltaX))
+      const newY = Math.max(0.05, Math.min(0.95, dragStateRef.current.startPosY + deltaY))
+      dragStateRef.current.curX = newX
+      dragStateRef.current.curY = newY
+      // Update DOM directly — no React re-render during drag
+      stickerRef.current.style.left = `${newX * 100}%`
+      stickerRef.current.style.top = `${newY * 100}%`
     }
 
     const handleMouseUp = () => {
-      setIsDragging(false)
-      if (onDragEnd) {
-        onDragEnd(position.x, position.y)
+      if (!isDraggingRef.current) return
+      isDraggingRef.current = false
+      if (stickerRef.current) {
+        stickerRef.current.style.zIndex = ""
+        stickerRef.current.style.cursor = ""
       }
+      const { curX, curY } = dragStateRef.current
+      setPosition({ x: curX, y: curY })
+      onDragEnd?.(curX, curY)
     }
 
     document.addEventListener("mousemove", handleMouseMove)
     document.addEventListener("mouseup", handleMouseUp)
-
     return () => {
       document.removeEventListener("mousemove", handleMouseMove)
       document.removeEventListener("mouseup", handleMouseUp)
     }
-  }, [isDragging, containerRef, scale, onDragEnd, position.x, position.y])
+  }, [containerRef, onDragEnd]) // stable deps — no position, no isDragging state
+
+  const handleColorChange = (colorId: string) => {
+    const next = { ...metadata, color: colorId }
+    setMetadata(next)
+    const colorStr = createStickerMetadata(next.icon, next.shape, next.color)
+    onUpdate?.(note.id, colorStr)
+  }
+
+  const handleIconChange = (iconId: string) => {
+    const next = { ...metadata, icon: iconId }
+    setMetadata(next)
+    const colorStr = createStickerMetadata(next.icon, next.shape, next.color)
+    onUpdate?.(note.id, colorStr)
+  }
 
   const icon = STICKER_ICONS.find((i) => i.id === metadata.icon) || STICKER_ICONS[0]
   const shape = STICKER_SHAPES.find((s) => s.id === metadata.shape) || STICKER_SHAPES[1]
   const color = STICKER_COLORS.find((c) => c.id === metadata.color) || STICKER_COLORS[0]
 
+  const gradientClass = color.id === "holographic"
+    ? "bg-gradient-to-br from-purple-400 via-pink-400 to-blue-400"
+    : `bg-gradient-to-br ${color.gradient}`
+
   return (
     <>
-      {/* Sticker Icon */}
       <div
         ref={stickerRef}
         className={cn(
-          "absolute cursor-pointer transition-all duration-200 select-none",
-          isDragging ? "z-50 scale-110" : "z-10 hover:z-20 hover:scale-110",
-          isOwn && "cursor-grab",
-          isDragging && "cursor-grabbing"
+          "absolute z-10 select-none transition-transform duration-150 hover:z-20 hover:scale-110",
+          isOwn ? "cursor-grab" : "cursor-pointer"
         )}
         style={{
           left: `${position.x * 100}%`,
           top: `${position.y * 100}%`,
           transform: "translate(-50%, -50%)",
+          pointerEvents: "auto",
         }}
         onMouseDown={handleMouseDown}
         onClick={(e) => {
-          if (!isDragging) {
-            e.stopPropagation()
-            setIsExpanded(true)
-          }
+          if (!isDraggingRef.current) { e.stopPropagation(); setIsExpanded(true) }
         }}
       >
-        <div
-          className={cn(
-            "w-12 h-12 flex items-center justify-center text-2xl shadow-lg transition-all",
-            shape.class,
-            color.id === "holographic"
-              ? "bg-gradient-to-br from-purple-400 via-pink-400 to-blue-400 animate-gradient"
-              : `bg-gradient-to-br ${color.gradient}`,
-            "ring-2 ring-white/50"
-          )}
-        >
+        <div className={cn("w-12 h-12 flex items-center justify-center text-2xl shadow-lg transition-all ring-2 ring-white/50", shape.class, gradientClass)}>
           {icon.emoji}
         </div>
       </div>
 
-      {/* Expanded Card Modal */}
       {isExpanded && (
         <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-black/30 z-40"
-            onClick={() => setIsExpanded(false)}
-          />
-
-          {/* Information Card */}
+          <div className="fixed inset-0 bg-black/30 z-40" onClick={() => setIsExpanded(false)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
             <div
               className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md pointer-events-auto overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Card Header with gradient */}
-              <div className={cn(
-                "h-2",
-                color.id === "holographic"
-                  ? "bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400"
-                  : `bg-gradient-to-r ${color.gradient}`
-              )} />
+              {/* Color bar */}
+              <div className={cn("h-2", gradientClass)} />
 
               <div className="p-5">
-                {/* Title and close */}
+                {/* Header */}
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center gap-3">
-                    <div
-                      className={cn(
-                        "w-10 h-10 flex items-center justify-center text-xl",
-                        shape.class,
-                        color.id === "holographic"
-                          ? "bg-gradient-to-br from-purple-400 via-pink-400 to-blue-400"
-                          : `bg-gradient-to-br ${color.gradient}`
-                      )}
-                    >
+                    <div className={cn("w-10 h-10 flex items-center justify-center text-xl", shape.class, gradientClass)}>
                       {icon.emoji}
                     </div>
                     <div>
-                      <p className="font-medium text-sm text-muted-foreground">
-                        {note.author?.display_name || note.author?.username || "Anonymous"}
-                      </p>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Calendar className="w-3 h-3" />
-                        {formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}
-                      </div>
+                      <p className="font-medium text-sm text-muted-foreground">{isOwn ? "You" : "Note"}</p>
+                      {note.createdAt && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Calendar className="w-3 h-3" />
+                          {formatDistanceToNow(new Date(note.createdAt), { addSuffix: true })}
+                        </div>
+                      )}
                     </div>
                   </div>
+
                   <div className="flex items-center gap-1">
-                    {isOwn && onDelete && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onDelete()
-                          setIsExpanded(false)
-                        }}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
+                    {/* 3-dot menu */}
+                    {isOwn && (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-64 p-3 space-y-3">
+                          {/* Color picker */}
+                          <div>
+                            <p className="text-xs font-medium text-muted-foreground mb-2">Color</p>
+                            <div className="flex flex-wrap gap-2">
+                              {STICKER_COLORS.map((c) => (
+                                <button
+                                  key={c.id}
+                                  title={c.label}
+                                  onClick={() => handleColorChange(c.id)}
+                                  className={cn(
+                                    "w-7 h-7 rounded-full ring-2 transition-all",
+                                    c.id === "holographic"
+                                      ? "bg-gradient-to-br from-purple-400 via-pink-400 to-blue-400"
+                                      : `bg-gradient-to-br ${c.gradient}`,
+                                    metadata.color === c.id ? "ring-foreground scale-110" : "ring-transparent hover:ring-muted-foreground"
+                                  )}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Icon picker */}
+                          <div>
+                            <p className="text-xs font-medium text-muted-foreground mb-2">Icon</p>
+                            <div className="grid grid-cols-6 gap-1">
+                              {STICKER_ICONS.map((i) => (
+                                <button
+                                  key={i.id}
+                                  title={i.label}
+                                  onClick={() => handleIconChange(i.id)}
+                                  className={cn(
+                                    "w-8 h-8 rounded-lg text-lg flex items-center justify-center transition-all",
+                                    metadata.icon === i.id ? "bg-primary/20 ring-1 ring-primary" : "hover:bg-muted"
+                                  )}
+                                >
+                                  {i.emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Delete */}
+                          <div className="border-t border-border pt-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="w-full text-destructive hover:text-destructive hover:bg-destructive/10 gap-2 justify-start"
+                              onClick={() => { onDelete?.(); setIsExpanded(false) }}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Delete sticker
+                            </Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => setIsExpanded(false)}
-                    >
+
+                    {/* Close */}
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsExpanded(false)}>
                       <X className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
 
-                {/* Content with scroll */}
+                {/* Content */}
                 <ScrollArea className="max-h-[300px]">
-                  <div className="prose prose-sm dark:prose-invert">
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{note.content}</p>
-                  </div>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{note.content}</p>
                 </ScrollArea>
 
-                {/* Page indicator */}
                 <div className="mt-4 pt-4 border-t border-border">
-                  <p className="text-xs text-muted-foreground">
-                    Page {note.page_number}
-                  </p>
+                  <p className="text-xs text-muted-foreground">Page {note.pageNumber}</p>
                 </div>
               </div>
             </div>
@@ -244,31 +278,17 @@ export function Sticker({ note, isOwn, onDelete, onDragEnd, containerRef, scale 
   )
 }
 
-// Helper function to parse metadata from the color field
-// Format: "icon:shape:color" or just legacy hex color
 function parseNoteMetadata(colorField: string): { icon: string; shape: string; color: string } {
-  // Check if it's the new format
   if (colorField.includes(":")) {
     const [icon, shape, color] = colorField.split(":")
     return { icon, shape, color }
   }
-
-  // Legacy format - convert hex colors to new format
   const legacyColorMap: Record<string, string> = {
-    "#FBBF24": "amber",
-    "#F472B6": "pink",
-    "#60A5FA": "blue",
-    "#34D399": "emerald",
+    "#FBBF24": "amber", "#F472B6": "pink", "#60A5FA": "blue", "#34D399": "emerald",
   }
-
-  return {
-    icon: "star",
-    shape: "rounded",
-    color: legacyColorMap[colorField] || "purple",
-  }
+  return { icon: "star", shape: "rounded", color: legacyColorMap[colorField] || "purple" }
 }
 
-// Helper function to create metadata string
 export function createStickerMetadata(icon: string, shape: string, color: string): string {
   return `${icon}:${shape}:${color}`
 }

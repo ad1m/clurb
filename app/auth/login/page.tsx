@@ -1,8 +1,6 @@
 "use client"
 
 import type React from "react"
-
-import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -21,19 +19,21 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    const supabase = createClient()
     setIsLoading(true)
     setError(null)
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
       })
-      if (error) throw error
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Login failed")
       router.push("/library")
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred")
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred")
     } finally {
       setIsLoading(false)
     }
@@ -52,7 +52,7 @@ export default function LoginPage() {
           <Card>
             <CardHeader className="text-center">
               <CardTitle className="text-2xl">Welcome back</CardTitle>
-              <CardDescription>Sign in to continue reading with friends</CardDescription>
+              <CardDescription>Sign in to your reading library</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleLogin}>
@@ -92,10 +92,7 @@ export default function LoginPage() {
                 </div>
                 <div className="mt-6 text-center text-sm">
                   Don&apos;t have an account?{" "}
-                  <Link
-                    href="/auth/sign-up"
-                    className="text-primary underline underline-offset-4 hover:text-primary/80"
-                  >
+                  <Link href="/auth/sign-up" className="text-primary underline underline-offset-4 hover:text-primary/80">
                     Sign up
                   </Link>
                 </div>

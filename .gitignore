@@ -17,7 +17,6 @@
 /build
 
 # misc
-.DS_Store
 *.pem
 
 # debug
@@ -47,3 +46,19 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+# Database — contains real user data, never commit
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# User-uploaded files — can be large and contain personal documents
+/uploads/
+
+# Claude Code session data — local only
+.claude/
+
+# Drizzle migration artifacts (generated locally)
+drizzle/

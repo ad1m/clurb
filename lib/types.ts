@@ -1,140 +1,89 @@
-// Database types for Clurb
+// Types matching Drizzle/SQLite schema (camelCase)
 
-export interface Profile {
+export interface User {
   id: string
+  email: string
   username: string
-  display_name: string | null
-  avatar_url: string | null
-  created_at: string
-  updated_at: string
+  displayName: string | null
+  createdAt: string | null
+  updatedAt: string | null
 }
 
-export interface File {
+export interface ClurbFile {
   id: string
-  owner_id: string
+  ownerId: string
   title: string
   description: string | null
-  file_url: string
-  file_type: string
-  cover_image_url: string | null
-  total_pages: number
-  created_at: string
-  updated_at: string
+  fileUrl: string
+  fileType: string
+  coverImageUrl: string | null
+  totalPages: number | null
+  createdAt: string | null
+  updatedAt: string | null
   // Joined fields
-  owner?: Profile
-  members?: FileMember[]
-  progress?: ReadingProgress
-}
-
-export interface FileMember {
-  id: string
-  file_id: string
-  user_id: string
-  role: "owner" | "editor" | "viewer"
-  invited_at: string
-  // Joined fields
-  user?: Profile
+  progress?: ReadingProgress | null
+  stickyNotes?: StickyNote[]
 }
 
 export interface ReadingProgress {
   id: string
-  file_id: string
-  user_id: string
-  current_page: number
-  last_read_at: string
+  fileId: string
+  userId: string
+  currentPage: number | null
+  lastReadAt: string | null
 }
 
 export interface StickyNote {
   id: string
-  file_id: string
-  author_id: string
-  page_number: number
+  fileId: string
+  authorId: string
+  pageNumber: number
   content: string
-  position_x: number
-  position_y: number
-  color: string
-  is_surprise: boolean
-  created_at: string
-  // Joined fields
-  author?: Profile
-}
-
-export interface ChatMessage {
-  id: string
-  file_id: string
-  sender_id: string
-  content: string
-  created_at: string
-  // Joined fields
-  sender?: Profile
+  positionX: number | null
+  positionY: number | null
+  color: string | null
+  createdAt: string | null
 }
 
 export interface Highlight {
   id: string
-  file_id: string
-  user_id: string
-  page_number: number
-  highlighted_text: string
-  start_offset: number | null
-  end_offset: number | null
-  ai_prompt: string | null
-  ai_response: string | null
-  created_at: string
+  fileId: string
+  userId: string
+  pageNumber: number
+  highlightedText: string
+  aiPrompt: string | null
+  aiResponse: string | null
+  createdAt: string | null
 }
 
 export interface ActivityLog {
   id: string
-  user_id: string
-  file_id: string | null
-  action_type: string
-  metadata: Record<string, unknown>
-  created_at: string
-  // Joined fields
-  file?: File
+  userId: string
+  fileId: string | null
+  actionType: string
+  metadata: string | null
+  createdAt: string | null
 }
 
-export interface Friendship {
-  id: string
-  user_id: string
-  friend_id: string
-  status: "pending" | "accepted" | "declined"
-  created_at: string
-  // Joined fields
-  user?: Profile
-  friend?: Profile
-}
-
-export interface FileInvitation {
-  id: string
-  file_id: string
-  from_user_id: string
-  to_user_id: string
-  status: "pending" | "accepted" | "declined"
-  message: string | null
-  created_at: string
-  responded_at: string | null
-  // Joined fields
-  file?: File
-  inviter?: Profile
-}
-
-// Agent Chat types for AI assistant history
 export interface AgentChat {
   id: string
-  user_id: string
-  title: string
-  created_at: string
-  updated_at: string
+  userId: string
+  title: string | null
+  createdAt: string | null
+  updatedAt: string | null
 }
 
 export interface AgentMessage {
   id: string
-  chat_id: string
-  role: "user" | "assistant"
+  chatId: string
+  role: string
   content: string
-  created_at: string
+  createdAt: string | null
 }
 
 export interface AgentChatWithMessages extends AgentChat {
   messages: AgentMessage[]
 }
+
+// Legacy alias for backwards compat during migration
+export type Profile = User

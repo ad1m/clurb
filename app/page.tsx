@@ -1,7 +1,7 @@
 import type React from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { BookOpen, Users, MessageSquare, Sparkles, StickyNote, BarChart3 } from "lucide-react"
+import { BookOpen, Sparkles, StickyNote, BarChart3, Brain, Upload } from "lucide-react"
 
 export default function HomePage() {
   return (
@@ -33,19 +33,19 @@ export default function HomePage() {
         <section className="max-w-7xl mx-auto px-6 py-24 text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-8">
             <Sparkles className="w-4 h-4" />
-            The New Book Club
+            Your personal AI reading library
           </div>
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-balance max-w-4xl mx-auto mb-6">
-            Reading is better <span className="text-primary">together</span>
+            Netflix for your <span className="text-primary">reading life</span>
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-12 text-pretty">
-            Share PDFs and documents with friends, leave surprise sticky notes for them to discover, and chat in
-            real-time as you read. Powered by AI to track and analyze your reading journey.
+            Upload PDFs and documents. Your AI agent tracks everything you read, answers questions about your library,
+            and helps you understand any passage — all in one beautiful space.
           </p>
           <div className="flex items-center justify-center gap-4">
             <Link href="/auth/sign-up">
               <Button size="lg" className="gap-2">
-                Start Reading Together
+                Build Your Library
                 <BookOpen className="w-4 h-4" />
               </Button>
             </Link>
@@ -61,34 +61,34 @@ export default function HomePage() {
         <section className="max-w-7xl mx-auto px-6 py-24">
           <div className="grid md:grid-cols-3 gap-8">
             <FeatureCard
-              icon={<Users className="w-6 h-6" />}
-              title="Share with Friends"
-              description="Upload PDFs and invite friends to read along. See where everyone is in the document."
+              icon={<Upload className="w-6 h-6" />}
+              title="Upload Any Document"
+              description="Add PDFs to your personal library. Auto-generated covers and organized shelves make it beautiful."
             />
             <FeatureCard
               icon={<StickyNote className="w-6 h-6" />}
-              title="Surprise Sticky Notes"
-              description="Leave hidden notes on any page for your friends to discover as they read."
-            />
-            <FeatureCard
-              icon={<MessageSquare className="w-6 h-6" />}
-              title="Real-time Chat"
-              description="Discuss what you're reading with an in-document chat that stays with the book."
+              title="Sticky Notes"
+              description="Leave notes on any page as you read. Thoughts, questions, summaries — all pinned right where you need them."
             />
             <FeatureCard
               icon={<Sparkles className="w-6 h-6" />}
-              title="AI-Powered Insights"
-              description="Highlight any text and ask AI to explain, summarize, or even generate images."
+              title="AI Highlight Assistant"
+              description="Highlight any passage and instantly ask AI to explain, summarize, or go deeper. Context-aware answers every time."
+            />
+            <FeatureCard
+              icon={<Brain className="w-6 h-6" />}
+              title="AI Reading Agent"
+              description="Ask natural language questions about your entire library. What have I been reading? Summarize chapter 3."
             />
             <FeatureCard
               icon={<BarChart3 className="w-6 h-6" />}
               title="Reading Analytics"
-              description="Ask your AI agent about your reading habits, progress, and activity history."
+              description="Track your progress across every book. See your reading history, streaks, and how far you've come."
             />
             <FeatureCard
               icon={<BookOpen className="w-6 h-6" />}
-              title="Your Digital Library"
-              description="All your documents in one beautiful, organized space with cover art."
+              title="Beautiful Library View"
+              description="All your documents in one organized, visual space. Pick up right where you left off — every time."
             />
           </div>
         </section>
@@ -96,9 +96,11 @@ export default function HomePage() {
         {/* CTA Section */}
         <section className="max-w-7xl mx-auto px-6 py-24">
           <div className="bg-primary/5 rounded-3xl p-12 text-center">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4 text-balance">Ready to transform how you read?</h2>
+            <h2 className="text-3xl md:text-4xl font-bold mb-4 text-balance">
+              Start building your reading library
+            </h2>
             <p className="text-muted-foreground text-lg mb-8 max-w-xl mx-auto">
-              Join Clurb today and start sharing your reading journey with friends.
+              Upload your first document and let your AI agent start learning your reading habits.
             </p>
             <Link href="/auth/sign-up">
               <Button size="lg">Create Your Account</Button>
@@ -116,7 +118,7 @@ export default function HomePage() {
             </div>
             <span className="text-sm text-muted-foreground">Clurb &copy; 2026</span>
           </div>
-          <p className="text-sm text-muted-foreground">The Social Reading App</p>
+          <p className="text-sm text-muted-foreground">Your personal AI reading library</p>
         </div>
       </footer>
     </div>

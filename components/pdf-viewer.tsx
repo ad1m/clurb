@@ -22,8 +22,13 @@ interface PDFViewerProps {
   onPageChange: (page: number) => void
   onTotalPagesChange: (total: number) => void
   onTextSelect?: (text: string, page: number) => void
+  isMarkupActive?: boolean
+  /** Ref attached to the full content area (page + margins) — for sticker positioning */
+  outerRef?: React.RefObject<HTMLDivElement | null>
   children?: React.ReactNode
 }
+
+const MARGIN_PX = 88
 
 export function PDFViewer({
   fileUrl,
@@ -31,6 +36,8 @@ export function PDFViewer({
   onPageChange,
   onTotalPagesChange,
   onTextSelect,
+  isMarkupActive,
+  outerRef,
   children,
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number | null>(null)
@@ -65,7 +72,6 @@ export function PDFViewer({
 
   const onDocumentLoadSuccess = useCallback(
     ({ numPages }: { numPages: number }) => {
-      console.log("[v0] PDF loaded successfully, pages:", numPages)
       setNumPages(numPages)
       setIsLoading(false)
       onTotalPagesChange(numPages)
@@ -115,11 +121,12 @@ export function PDFViewer({
   }
 
   const handleTextSelection = useCallback(() => {
+    if (isMarkupActive) return
     const selection = window.getSelection()
     if (selection && selection.toString().trim() && onTextSelect) {
       onTextSelect(selection.toString().trim(), currentPage)
     }
-  }, [currentPage, onTextSelect])
+  }, [currentPage, onTextSelect, isMarkupActive])
 
   return (
     <div className="flex flex-col h-full">
@@ -151,14 +158,16 @@ export function PDFViewer({
           </Button>
         </div>
 
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" onClick={() => setScale((s) => Math.max(0.5, s - 0.1))}>
-            <ZoomOut className="w-4 h-4" />
-          </Button>
-          <span className="text-sm text-muted-foreground w-14 text-center">{Math.round(scale * 100)}%</span>
-          <Button variant="ghost" size="icon" onClick={() => setScale((s) => Math.min(2, s + 0.1))}>
-            <ZoomIn className="w-4 h-4" />
-          </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" onClick={() => setScale((s) => Math.max(0.5, s - 0.1))}>
+              <ZoomOut className="w-4 h-4" />
+            </Button>
+            <span className="text-sm text-muted-foreground w-14 text-center">{Math.round(scale * 100)}%</span>
+            <Button variant="ghost" size="icon" onClick={() => setScale((s) => Math.min(2, s + 0.1))}>
+              <ZoomIn className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -183,23 +192,43 @@ export function PDFViewer({
               </div>
             }
           >
-            <div className="relative shadow-xl">
-              <Page
-                key={`page-${currentPage}-${scale}`}
-                pageNumber={currentPage}
-                scale={scale}
-                renderTextLayer={true}
-                renderAnnotationLayer={true}
-                className="bg-white"
-                onRenderSuccess={onPageRenderSuccess}
-                onRenderError={onPageRenderError}
-                loading={
-                  <div className="flex items-center justify-center h-96 w-[612px] bg-white">
-                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                  </div>
-                }
-              />
-              {/* Sticky notes overlay */}
+            {/* Outer content area: page + MARGIN_PX margins on each side.
+              outerRef lets the read page use this as the coordinate space
+              for stickers and the annotation canvas. */}
+            <div
+              ref={outerRef}
+              className="relative"
+              style={{ padding: `0 ${MARGIN_PX}px` }}
+            >
+              {/* Actual PDF page */}
+              <div className="relative shadow-xl">
+                {/* Suppress pointer events on pdf text/annotation layers while a
+                    markup tool is active so the canvas overlay can capture them */}
+                {isMarkupActive && (
+                  <style>{`
+                    .react-pdf__Page__textContent,
+                    .react-pdf__Page__annotations { pointer-events: none !important; }
+                  `}</style>
+                )}
+                <Page
+                  key={`page-${currentPage}-${scale}`}
+                  pageNumber={currentPage}
+                  scale={scale}
+                  renderTextLayer={true}
+                  renderAnnotationLayer={true}
+                  className="bg-white"
+                  onRenderSuccess={onPageRenderSuccess}
+                  onRenderError={onPageRenderError}
+                  loading={
+                    <div className="flex items-center justify-center h-96 w-[612px] bg-white">
+                      <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                    </div>
+                  }
+                />
+              </div>
+
+              {/* Canvas overlay + stickers live here — absolute inset-0 spans the
+                  full width including both margin gutters */}
               {children}
             </div>
           </Document>

@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { useChat } from "@ai-sdk/react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -66,6 +68,7 @@ export function AIAssistantSidebar({
   const [isLoadingFromDb, setIsLoadingFromDb] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const lastSavedMessageCountRef = useRef<number>(0)
+  const dismissedTextRef = useRef<string | null>(null)
 
   const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages, append } = useChat({
     api: "/api/highlight-ai",
@@ -114,18 +117,10 @@ export function AIAssistantSidebar({
 
   // Handle new highlighted text - set it as pending context for new messages
   useEffect(() => {
-    if (selectedText && selectedText !== currentHighlight) {
-      // Only set highlight if we're starting fresh (no messages yet)
-      // or if we want to add new context to the conversation
-      if (messages.length === 0) {
-        setCurrentHighlight(selectedText)
-      } else {
-        // If there are already messages, add the new highlight as context
-        // but don't show the preview box - it will be included in the next message
-        setCurrentHighlight(selectedText)
-      }
+    if (selectedText && selectedText !== dismissedTextRef.current) {
+      setCurrentHighlight(selectedText)
     }
-  }, [selectedText, currentHighlight, messages.length])
+  }, [selectedText])
 
   // Clear the highlight preview after first message is sent
   // The highlight is already in the system prompt context
@@ -502,6 +497,14 @@ export function AIAssistantSidebar({
                             {currentHighlight}
                           </p>
                         </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-6 h-6 shrink-0 text-muted-foreground hover:text-foreground"
+                          onClick={() => { dismissedTextRef.current = currentHighlight; setCurrentHighlight(null) }}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
                       </div>
                     </div>
 
@@ -556,7 +559,13 @@ export function AIAssistantSidebar({
                             : "bg-card border border-border rounded-tl-sm"
                         )}
                       >
-                        <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                        {message.role === "assistant" ? (
+                          <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content as string}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content as string}</p>
+                        )}
 
                         {/* Create Sticky Note Button for assistant messages */}
                         {message.role === "assistant" && onCreateStickyNote && (

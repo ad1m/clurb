@@ -1,55 +1,27 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { NextRequest, NextResponse } from "next/server"
+import { getAuthUser } from "@/lib/auth"
+import { db } from "@/db"
+import { agentChats, agentMessages } from "@/db/schema"
+import { eq, and } from "drizzle-orm"
 
-// POST /api/agent/chats/[id]/messages - Add a message to a chat
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { id: chatId } = await params
-  const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const chat = db.select().from(agentChats).where(and(eq(agentChats.id, chatId), eq(agentChats.userId, auth.id))).get()
+  if (!chat) return NextResponse.json({ error: "Chat not found" }, { status: 404 })
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const { role, content } = await req.json()
+  if (!role || !content) return NextResponse.json({ error: "Role and content required" }, { status: 400 })
 
-  // Verify the chat belongs to the user
-  const { data: chat, error: chatError } = await supabase
-    .from("agent_chats")
-    .select("id")
-    .eq("id", chatId)
-    .eq("user_id", user.id)
-    .single()
+  const id = crypto.randomUUID()
+  db.insert(agentMessages).values({ id, chatId, role, content }).run()
 
-  if (chatError || !chat) {
-    return NextResponse.json({ error: "Chat not found" }, { status: 404 })
-  }
+  // Update chat's updatedAt
+  db.update(agentChats).set({ updatedAt: new Date().toISOString() }).where(eq(agentChats.id, chatId)).run()
 
-  const body = await req.json()
-  const { role, content } = body
-
-  if (!role || !content) {
-    return NextResponse.json({ error: "Role and content are required" }, { status: 400 })
-  }
-
-  if (role !== "user" && role !== "assistant") {
-    return NextResponse.json({ error: "Role must be 'user' or 'assistant'" }, { status: 400 })
-  }
-
-  const { data: message, error } = await supabase
-    .from("agent_messages")
-    .insert({
-      chat_id: chatId,
-      role,
-      content,
-    })
-    .select()
-    .single()
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
+  const message = db.select().from(agentMessages).where(eq(agentMessages.id, id)).get()
   return NextResponse.json(message)
 }

@@ -1,8 +1,6 @@
 "use client"
 
 import type React from "react"
-
-import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -23,7 +21,6 @@ export default function SignUpPage() {
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
-    const supabase = createClient()
     setIsLoading(true)
     setError(null)
 
@@ -32,7 +29,6 @@ export default function SignUpPage() {
       setIsLoading(false)
       return
     }
-
     if (username.length < 3) {
       setError("Username must be at least 3 characters")
       setIsLoading(false)
@@ -40,21 +36,17 @@ export default function SignUpPage() {
     }
 
     try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/library`,
-          data: {
-            username: username,
-            display_name: username,
-          },
-        },
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, username }),
       })
-      if (error) throw error
-      router.push("/auth/sign-up-success")
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred")
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Registration failed")
+      router.push("/library")
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred")
     } finally {
       setIsLoading(false)
     }
@@ -73,7 +65,7 @@ export default function SignUpPage() {
           <Card>
             <CardHeader className="text-center">
               <CardTitle className="text-2xl">Join Clurb</CardTitle>
-              <CardDescription>Create an account to start reading with friends</CardDescription>
+              <CardDescription>Create your personal AI reading library</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSignUp}>
@@ -86,7 +78,7 @@ export default function SignUpPage() {
                       placeholder="bookworm42"
                       required
                       value={username}
-                      onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ""))}
+                      onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
                     />
                   </div>
                   <div className="grid gap-2">
@@ -105,6 +97,7 @@ export default function SignUpPage() {
                     <Input
                       id="password"
                       type="password"
+                      placeholder="8+ characters"
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}

@@ -1,77 +1,39 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { NextRequest, NextResponse } from "next/server"
+import { getAuthUser } from "@/lib/auth"
+import { db } from "@/db"
+import { agentChats, agentMessages } from "@/db/schema"
+import { eq, and, asc } from "drizzle-orm"
 import { generateText } from "ai"
-import { xai } from "@ai-sdk/xai"
+import { openai } from "@ai-sdk/openai"
 
-// POST /api/agent/chats/[id]/generate-title - Auto-generate a title using LLM
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { id: chatId } = await params
-  const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const chat = db.select().from(agentChats).where(and(eq(agentChats.id, chatId), eq(agentChats.userId, auth.id))).get()
+  if (!chat) return NextResponse.json({ error: "Chat not found" }, { status: 404 })
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  // Get the chat and verify ownership
-  const { data: chat, error: chatError } = await supabase
-    .from("agent_chats")
-    .select("id, title")
-    .eq("id", chatId)
-    .eq("user_id", user.id)
-    .single()
-
-  if (chatError || !chat) {
-    return NextResponse.json({ error: "Chat not found" }, { status: 404 })
-  }
-
-  // Get the first user message to generate title from
-  const { data: messages } = await supabase
-    .from("agent_messages")
-    .select("content")
-    .eq("chat_id", chatId)
-    .eq("role", "user")
-    .order("created_at", { ascending: true })
+  const firstUserMsg = db
+    .select({ content: agentMessages.content })
+    .from(agentMessages)
+    .where(and(eq(agentMessages.chatId, chatId), eq(agentMessages.role, "user")))
+    .orderBy(asc(agentMessages.createdAt))
     .limit(1)
+    .get()
 
-  if (!messages || messages.length === 0) {
-    return NextResponse.json({ error: "No messages to generate title from" }, { status: 400 })
-  }
+  if (!firstUserMsg) return NextResponse.json({ error: "No messages yet" }, { status: 400 })
 
-  const firstMessage = messages[0].content
+  const { text } = await generateText({
+    model: openai("gpt-4o-mini"),
+    prompt: `Generate a very short title (3-5 words) for a reading assistant chat that starts with: "${firstUserMsg.content}"\n\nOnly output the title, no quotes or punctuation.`,
+    maxTokens: 20,
+  })
 
-  try {
-    // Use LLM to generate a short, descriptive title
-    const { text } = await generateText({
-      model: xai("grok-3-mini"),
-      prompt: `Generate a very short title (3-5 words max) for a chat conversation that starts with this message. Only output the title, nothing else. No quotes, no punctuation at the end.
+  const title = text.trim().replace(/^["']|["']$/g, "").slice(0, 50)
+  db.update(agentChats).set({ title, updatedAt: new Date().toISOString() }).where(eq(agentChats.id, chatId)).run()
 
-User's first message: "${firstMessage}"
-
-Title:`,
-      maxTokens: 20,
-    })
-
-    const title = text.trim().replace(/^["']|["']$/g, "").slice(0, 50) // Clean up and limit length
-
-    // Update the chat title
-    const { data: updatedChat, error: updateError } = await supabase
-      .from("agent_chats")
-      .update({ title })
-      .eq("id", chatId)
-      .select()
-      .single()
-
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 })
-    }
-
-    return NextResponse.json(updatedChat)
-  } catch (error) {
-    console.error("Error generating title:", error)
-    return NextResponse.json({ error: "Failed to generate title" }, { status: 500 })
-  }
+  const updated = db.select().from(agentChats).where(eq(agentChats.id, chatId)).get()
+  return NextResponse.json(updated)
 }

@@ -3,17 +3,18 @@
 import { useEffect, useState, useCallback, useRef, use } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { createClient } from "@/lib/supabase/client"
-import type { File, FileMember, Profile, StickyNote as StickyNoteType, ReadingProgress } from "@/lib/types"
-import { PDFViewer } from "@/components/pdf-viewer"
+import type { ClurbFile, StickyNote, User } from "@/lib/types"
+import dynamic from "next/dynamic"
+const PDFViewer = dynamic(() => import("@/components/pdf-viewer").then((m) => m.PDFViewer), { ssr: false })
 import { Sticker } from "@/components/sticker"
 import { StickerCreator, QuickStickerCreator } from "@/components/sticker-creator"
-import { ReaderSidebar } from "@/components/reader-sidebar"
-import { ChatPanel } from "@/components/chat-panel"
 import { AIAssistantSidebar } from "@/components/ai-assistant-sidebar"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
-import { BookOpen, ArrowLeft, Loader2, MessageSquare, PanelRightClose, PanelRight, Sparkles } from "lucide-react"
+import { BookOpen, ArrowLeft, Loader2, Sparkles, Pencil } from "lucide-react"
+import type { Mark } from "@/components/annotation-canvas"
+const AnnotationCanvas = dynamic(() => import("@/components/annotation-canvas").then((m) => m.AnnotationCanvas), { ssr: false })
+import { AnnotationToolbar } from "@/components/annotation-toolbar"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -21,215 +22,119 @@ interface PageProps {
 
 export default function ReadPage({ params }: PageProps) {
   const { id: fileId } = use(params)
-  const [file, setFile] = useState<File | null>(null)
-  const [members, setMembers] = useState<(FileMember & { user?: Profile; progress?: ReadingProgress })[]>([])
-  const [stickyNotes, setStickyNotes] = useState<(StickyNoteType & { author?: Profile })[]>([])
+  const [file, setFile] = useState<ClurbFile | null>(null)
+  const [user, setUser] = useState<User | null>(null)
+  const [stickyNotes, setStickyNotes] = useState<StickyNote[]>([])
   const [currentPage, setCurrentPage] = useState(1)
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isCreatingNote, setIsCreatingNote] = useState(false)
-  const [showSidebar, setShowSidebar] = useState(true)
-  const [showChat, setShowChat] = useState(false)
   const [showAIAssistant, setShowAIAssistant] = useState(false)
-  const [onlineUsers, setOnlineUsers] = useState<string[]>([])
   const [selectedText, setSelectedText] = useState<string | null>(null)
   const [quickStickerData, setQuickStickerData] = useState<{ title: string; content: string } | null>(null)
+  const [showAnnotationToolbar, setShowAnnotationToolbar] = useState(false)
+  const [activeTool, setActiveTool] = useState<"highlight" | "pen" | "eraser" | null>(null)
+  const [activeColor, setActiveColor] = useState("#FBBF24")
+  const [pageMarks, setPageMarks] = useState<Mark[]>([])
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pageContainerRef = useRef<HTMLDivElement>(null)
+  // contentAreaRef is attached to the full page+margin container inside PDFViewer.
+  // It serves as the coordinate space for both the annotation canvas and stickers.
+  const contentAreaRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
-  const supabase = createClient()
   const { toast } = useToast()
 
-  const fetchData = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      router.push("/auth/login")
-      return
+  const fetchStickyNotes = useCallback(async (page: number) => {
+    const res = await fetch(`/api/sticky-notes?fileId=${fileId}`)
+    if (res.ok) {
+      const { stickyNotes: notes } = await res.json()
+      setStickyNotes((notes as StickyNote[]).filter((n) => n.pageNumber === page))
     }
+  }, [fileId])
 
-    setCurrentUserId(user.id)
+  const fetchData = useCallback(async () => {
+    const meRes = await fetch("/api/auth/me")
+    if (!meRes.ok) { router.push("/auth/login"); return }
+    const { user: currentUser } = await meRes.json()
+    setUser(currentUser)
 
-    // Fetch file
-    const { data: fileData, error: fileError } = await supabase.from("files").select("*").eq("id", fileId).single()
-
-    if (fileError || !fileData) {
-      toast({
-        title: "File not found",
-        description: "This document doesn't exist or you don't have access.",
-        variant: "destructive",
-      })
+    const fileRes = await fetch(`/api/files/${fileId}`)
+    if (!fileRes.ok) {
+      toast({ title: "File not found", description: "This document doesn't exist or you don't have access.", variant: "destructive" })
       router.push("/library")
       return
     }
 
+    const { file: fileData } = await fileRes.json()
     setFile(fileData)
 
-    // Fetch members with their profiles and reading progress
-    const { data: membersData } = await supabase
-      .from("file_members")
-      .select(`
-        *,
-        user:profiles(*),
-        progress:reading_progress(*)
-      `)
-      .eq("file_id", fileId)
-
-    const membersWithProgress =
-      membersData?.map((m) => ({
-        ...m,
-        progress: Array.isArray(m.progress)
-          ? m.progress.find((p: ReadingProgress) => p.user_id === m.user_id)
-          : m.progress,
-      })) || []
-
-    setMembers(membersWithProgress)
-
-    // Get user's reading progress
-    const { data: progress } = await supabase
-      .from("reading_progress")
-      .select("*")
-      .eq("file_id", fileId)
-      .eq("user_id", user.id)
-      .single()
-
-    if (progress) {
-      setCurrentPage(progress.current_page)
+    // Restore last reading position
+    if (fileData.progress?.currentPage) {
+      setCurrentPage(fileData.progress.currentPage)
+      await fetchStickyNotes(fileData.progress.currentPage)
+    } else {
+      await fetchStickyNotes(1)
     }
 
-    // Fetch sticky notes for current page
-    fetchStickyNotes(user.id)
-
     setIsLoading(false)
-  }, [fileId, supabase, router, toast])
-
-  const fetchStickyNotes = async (userId?: string) => {
-    const uid = userId || currentUserId
-    if (!uid) return
-
-    const { data: notes } = await supabase
-      .from("sticky_notes")
-      .select(`
-        *,
-        author:profiles(*)
-      `)
-      .eq("file_id", fileId)
-      .eq("page_number", currentPage)
-
-    setStickyNotes(notes || [])
-  }
+  }, [fileId, router, toast, fetchStickyNotes])
 
   useEffect(() => {
     fetchData()
+  }, [fetchData])
 
-    // Set up presence tracking
-    if (currentUserId && fileId) {
-      const presenceChannel = supabase.channel(`presence:file:${fileId}`, {
-        config: {
-          presence: {
-            key: currentUserId,
-          },
-        },
-      })
-
-      presenceChannel
-        .on('presence', { event: 'sync' }, () => {
-          const state = presenceChannel.presenceState()
-          const userIds = Object.keys(state)
-          setOnlineUsers(userIds)
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await presenceChannel.track({
-              user_id: currentUserId,
-              online_at: new Date().toISOString(),
-            })
-          }
-        })
-
-      return () => {
-        presenceChannel.unsubscribe()
-      }
-    }
-  }, [fetchData, currentUserId, fileId, supabase])
-
+  // Reload sticky notes when page changes
   useEffect(() => {
-    if (currentUserId) {
-      fetchStickyNotes()
-    }
-  }, [currentPage, currentUserId])
+    if (user) fetchStickyNotes(currentPage)
+  }, [currentPage, user, fetchStickyNotes])
 
-  // Update reading progress when page changes
+  // Load annotations when page changes
   useEffect(() => {
-    if (!currentUserId || !fileId) return
-
-    const updateProgress = async () => {
-      await supabase.from("reading_progress").upsert(
-        {
-          file_id: fileId,
-          user_id: currentUserId,
-          current_page: currentPage,
-          last_read_at: new Date().toISOString(),
-        },
-        { onConflict: "file_id,user_id" },
-      )
-
-      // Log activity
-      await supabase.from("activity_log").insert({
-        user_id: currentUserId,
-        file_id: fileId,
-        action_type: "page_viewed",
-        metadata: { page: currentPage },
+    if (!user || !fileId) return
+    let cancelled = false
+    fetch(`/api/annotations?fileId=${fileId}&pageNumber=${currentPage}`)
+      .then((r) => r.json())
+      .then(({ data }) => {
+        if (!cancelled) setPageMarks(data?.marks ?? [])
       })
-    }
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [currentPage, user, fileId])
 
-    const debounce = setTimeout(updateProgress, 1000)
-    return () => clearTimeout(debounce)
-  }, [currentPage, currentUserId, fileId, supabase])
+  // Debounced reading progress update
+  useEffect(() => {
+    if (!user || !fileId) return
+    const timer = setTimeout(async () => {
+      await fetch("/api/reading-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId, currentPage }),
+      })
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [currentPage, user, fileId])
 
   const handleCreateSticker = async (title: string, content: string, metadata: string, x: number, y: number) => {
-    if (!currentUserId) return
-
+    if (!user) return
     setIsCreatingNote(true)
     try {
-      const { data: note, error } = await supabase
-        .from("sticky_notes")
-        .insert({
-          file_id: fileId,
-          author_id: currentUserId,
-          page_number: currentPage,
+      const res = await fetch("/api/sticky-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileId,
+          pageNumber: currentPage,
           content: title ? `${title}\n\n${content}` : content,
-          color: metadata, // Store icon:shape:color metadata in color field
-          position_x: x,
-          position_y: y,
-          is_surprise: true,
-        })
-        .select(`*, author:profiles(*)`)
-        .single()
-
-      if (error) throw error
-
-      setStickyNotes((prev) => [...prev, note])
-
-      // Log activity
-      await supabase.from("activity_log").insert({
-        user_id: currentUserId,
-        file_id: fileId,
-        action_type: "sticky_note_created",
-        metadata: { page: currentPage, note_id: note.id },
+          color: metadata,
+          positionX: x,
+          positionY: y,
+        }),
       })
-
-      toast({
-        title: "Sticker added",
-        description: "Your friends will discover this when they reach this page!",
-      })
+      if (!res.ok) throw new Error("Failed to create sticker")
+      const { stickyNote } = await res.json()
+      setStickyNotes((prev) => [...prev, stickyNote])
+      toast({ title: "Sticker added", description: "Your sticker has been pinned to this page!" })
     } catch {
-      toast({
-        title: "Failed to create sticker",
-        description: "There was an error saving your sticker.",
-        variant: "destructive",
-      })
+      toast({ title: "Failed to create sticker", variant: "destructive" })
     } finally {
       setIsCreatingNote(false)
       setQuickStickerData(null)
@@ -238,46 +143,61 @@ export default function ReadPage({ params }: PageProps) {
 
   const handleDeleteNote = async (noteId: string) => {
     try {
-      await supabase.from("sticky_notes").delete().eq("id", noteId)
+      await fetch(`/api/sticky-notes/${noteId}`, { method: "DELETE" })
       setStickyNotes((prev) => prev.filter((n) => n.id !== noteId))
       toast({ title: "Sticker deleted" })
     } catch {
-      toast({
-        title: "Failed to delete",
-        description: "There was an error deleting your sticker.",
-        variant: "destructive",
-      })
+      toast({ title: "Failed to delete sticker", variant: "destructive" })
     }
+  }
+
+  const handleUpdateNoteColor = (noteId: string, color: string) => {
+    fetch(`/api/sticky-notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ color }),
+    }).catch(() => {})
+    setStickyNotes((prev) => prev.map((n) => n.id === noteId ? { ...n, color } : n))
   }
 
   const handleUpdateNotePosition = async (noteId: string, x: number, y: number) => {
-    try {
-      await supabase
-        .from("sticky_notes")
-        .update({ position_x: x, position_y: y })
-        .eq("id", noteId)
-    } catch {
-      console.error("Failed to update sticker position")
-    }
+    fetch(`/api/sticky-notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ positionX: x, positionY: y }),
+    }).catch(() => {})
+    setStickyNotes((prev) => prev.map((n) => n.id === noteId ? { ...n, positionX: x, positionY: y } : n))
   }
 
   const handleTotalPagesChange = async (total: number) => {
-    if (file && file.total_pages !== total) {
-      await supabase.from("files").update({ total_pages: total }).eq("id", fileId)
-      setFile((prev) => (prev ? { ...prev, total_pages: total } : null))
+    if (file && file.totalPages !== total) {
+      await fetch(`/api/files/${fileId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ totalPages: total }),
+      })
+      setFile((prev) => (prev ? { ...prev, totalPages: total } : null))
     }
   }
 
-  const handleTextSelect = (text: string, page: number) => {
+  const handleTextSelect = (text: string) => {
     if (text.length > 10) {
       setSelectedText(text)
       setShowAIAssistant(true)
     }
   }
 
-  const handleCreateStickyFromAI = (title: string, content: string) => {
-    setQuickStickerData({ title, content })
-  }
+  const handleMarksChange = useCallback((marks: Mark[]) => {
+    setPageMarks(marks)
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      fetch("/api/annotations", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId, pageNumber: currentPage, data: { marks } }),
+      }).catch(() => {})
+    }, 800)
+  }, [fileId, currentPage])
 
   if (isLoading) {
     return (
@@ -287,9 +207,7 @@ export default function ReadPage({ params }: PageProps) {
     )
   }
 
-  if (!file) {
-    return null
-  }
+  if (!file) return null
 
   return (
     <div className="h-screen bg-background flex flex-col">
@@ -313,6 +231,19 @@ export default function ReadPage({ params }: PageProps) {
           <StickerCreator onCreateSticker={handleCreateSticker} isCreating={isCreatingNote} />
 
           <Button
+            variant={showAnnotationToolbar ? "default" : "ghost"}
+            size="sm"
+            className="gap-2"
+            onClick={() => {
+              setShowAnnotationToolbar((v) => !v)
+              if (showAnnotationToolbar) setActiveTool(null)
+            }}
+          >
+            <Pencil className="w-4 h-4" />
+            Markup
+          </Button>
+
+          <Button
             variant={showAIAssistant ? "default" : "ghost"}
             size="sm"
             className="gap-2"
@@ -321,80 +252,73 @@ export default function ReadPage({ params }: PageProps) {
             <Sparkles className="w-4 h-4" />
             AI Assistant
           </Button>
-
-          <Button
-            variant={showChat ? "default" : "ghost"}
-            size="icon"
-            title="Chat"
-            onClick={() => setShowChat(!showChat)}
-          >
-            <MessageSquare className="w-4 h-4" />
-          </Button>
-
-          <Button variant="ghost" size="icon" onClick={() => setShowSidebar(!showSidebar)}>
-            {showSidebar ? <PanelRightClose className="w-4 h-4" /> : <PanelRight className="w-4 h-4" />}
-          </Button>
         </div>
       </header>
 
       {/* Main Content */}
       <div className="flex-1 flex min-h-0">
-        {/* PDF Viewer */}
         <div className="flex-1 min-w-0" ref={pageContainerRef}>
           <PDFViewer
-            fileUrl={file.file_url}
+            fileUrl={file.fileUrl}
             currentPage={currentPage}
             onPageChange={setCurrentPage}
             onTotalPagesChange={handleTotalPagesChange}
             onTextSelect={handleTextSelect}
+            isMarkupActive={activeTool !== null}
+            outerRef={contentAreaRef}
           >
-            {/* Stickers Overlay */}
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="relative w-full h-full pointer-events-auto">
-                {stickyNotes.map((note) => (
-                  <Sticker
-                    key={note.id}
-                    note={note}
-                    isOwn={note.author_id === currentUserId}
-                    onDelete={() => handleDeleteNote(note.id)}
-                    onDragEnd={(x, y) => handleUpdateNotePosition(note.id, x, y)}
-                    containerRef={pageContainerRef}
-                  />
-                ))}
-              </div>
+            {/* Annotation canvas — absolute inset-0 spans full content area incl. margins */}
+            <AnnotationCanvas
+              marks={pageMarks}
+              activeTool={activeTool}
+              activeColor={activeColor}
+              onMarksChange={handleMarksChange}
+            />
+
+            {/* Sticker overlay — pointer-events-none so events pass through to canvas/text.
+                Individual <Sticker> elements still receive events (CSS spec: pointer-events:none
+                on a parent does not block children from being event targets). */}
+            <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
+              {stickyNotes.map((note) => (
+                <Sticker
+                  key={note.id}
+                  note={note}
+                  isOwn={note.authorId === user?.id}
+                  onDelete={() => handleDeleteNote(note.id)}
+                  onUpdate={(id, color) => handleUpdateNoteColor(id, color)}
+                  onDragEnd={(x, y) => handleUpdateNotePosition(note.id, x, y)}
+                  containerRef={contentAreaRef}
+                />
+              ))}
             </div>
           </PDFViewer>
         </div>
-
-        {/* Sidebar */}
-        {showSidebar && !showAIAssistant && (
-          <ReaderSidebar
-            file={file}
-            members={members}
-            currentUserId={currentUserId || ""}
-            onlineUserIds={onlineUsers}
-          />
-        )}
       </div>
-
-      {currentUserId && (
-        <ChatPanel fileId={fileId} currentUserId={currentUserId} isOpen={showChat} onClose={() => setShowChat(false)} />
-      )}
 
       {/* AI Assistant Sidebar */}
       <AIAssistantSidebar
         isOpen={showAIAssistant}
-        onClose={() => {
-          setShowAIAssistant(false)
-          setSelectedText(null)
-        }}
+        onClose={() => { setShowAIAssistant(false); setSelectedText(null) }}
         selectedText={selectedText}
         fileId={fileId}
         pageNumber={currentPage}
-        onCreateStickyNote={handleCreateStickyFromAI}
+        onCreateStickyNote={(title, content) => setQuickStickerData({ title, content })}
       />
 
-      {/* Quick Sticker Creator (from AI response) */}
+      {/* Annotation toolbar — floats at bottom center */}
+      {showAnnotationToolbar && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+          <AnnotationToolbar
+            activeTool={activeTool}
+            activeColor={activeColor}
+            onToolChange={setActiveTool}
+            onColorChange={setActiveColor}
+            onClearAll={() => handleMarksChange([])}
+            onClose={() => { setShowAnnotationToolbar(false); setActiveTool(null) }}
+          />
+        </div>
+      )}
+
       {quickStickerData && (
         <QuickStickerCreator
           title={quickStickerData.title}

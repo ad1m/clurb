@@ -1,11 +1,13 @@
 "use client"
 
-import type { File } from "@/lib/types"
-import { FileCard } from "./file-card"
+import dynamic from "next/dynamic"
+import type { ClurbFile } from "@/lib/types"
 import { FileText } from "lucide-react"
 
+const FileCard = dynamic(() => import("./file-card").then((m) => m.FileCard), { ssr: false })
+
 interface LibraryGridProps {
-  files: File[]
+  files: ClurbFile[]
   emptyMessage?: string
   onFileUpdate?: () => void
 }
@@ -19,7 +21,7 @@ export function LibraryGrid({ files, emptyMessage = "No files yet", onFileUpdate
         </div>
         <h3 className="text-lg font-medium mb-1">{emptyMessage}</h3>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Upload a PDF or document to start reading and sharing with friends.
+          Upload a PDF to get started. Your AI agent will track everything you read.
         </p>
       </div>
     )
@@ -31,8 +33,7 @@ export function LibraryGrid({ files, emptyMessage = "No files yet", onFileUpdate
         <FileCard
           key={file.id}
           file={file}
-          memberCount={file.members?.length}
-          currentPage={file.progress?.current_page}
+          currentPage={file.progress?.currentPage ?? undefined}
           onUpdate={onFileUpdate}
         />
       ))}

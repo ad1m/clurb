@@ -1,58 +1,39 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { db } from "@/db"
+import { agentChats } from "@/db/schema"
+import { eq, desc } from "drizzle-orm"
 
-// GET /api/agent/chats - List all chats for the current user
 export async function GET() {
-  const supabase = await createClient()
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const { data: chats, error } = await supabase
-    .from("agent_chats")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false })
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  const chats = db
+    .select()
+    .from(agentChats)
+    .where(eq(agentChats.userId, auth.id))
+    .orderBy(desc(agentChats.updatedAt))
+    .all()
 
   return NextResponse.json(chats)
 }
 
-// POST /api/agent/chats - Create a new chat
 export async function POST(req: Request) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const auth = await getAuthUser()
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))
-  const title = body.title || "New Chat"
+  const id = crypto.randomUUID()
+  const now = new Date().toISOString()
 
-  const { data: chat, error } = await supabase
-    .from("agent_chats")
-    .insert({
-      user_id: user.id,
-      title,
-    })
-    .select()
-    .single()
+  db.insert(agentChats).values({
+    id,
+    userId: auth.id,
+    title: body.title || "New Chat",
+    createdAt: now,
+    updatedAt: now,
+  }).run()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
+  const chat = db.select().from(agentChats).where(eq(agentChats.id, id)).get()
   return NextResponse.json(chat)
 }
