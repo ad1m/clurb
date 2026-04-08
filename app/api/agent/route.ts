@@ -112,6 +112,49 @@ export async function POST(req: Request) {
       },
     }),
 
+    createVisualization: tool({
+      description: "Create a chart or visualization of the user's reading data. Use this whenever a user asks for a chart, graph, plot, or visualization — including requests for average lines, specific chart types (bar, line, area), or custom time ranges.",
+      parameters: z.object({
+        chartType: z.enum(["bar", "line", "area"]).describe("Type of chart: 'bar' for comparisons, 'line' for trends, 'area' for volume over time"),
+        days: z.number().describe("Number of days of data to include (e.g. 7, 14, 30)"),
+        title: z.string().describe("A short descriptive title for the chart"),
+        showAverage: z.boolean().describe("Whether to display a horizontal reference line at the average value"),
+      }),
+      execute: async ({ chartType, days, title, showAverage }) => {
+        const startDate = new Date()
+        startDate.setDate(startDate.getDate() - days)
+
+        const activity = db
+          .select({ createdAt: activityLog.createdAt })
+          .from(activityLog)
+          .where(and(
+            eq(activityLog.userId, userId),
+            eq(activityLog.actionType, "page_viewed"),
+            gte(activityLog.createdAt!, startDate.toISOString())
+          ))
+          .all()
+
+        const dailyCounts: Record<string, number> = {}
+        const now = new Date()
+        for (let i = days - 1; i >= 0; i--) {
+          const d = new Date(now)
+          d.setDate(d.getDate() - i)
+          dailyCounts[d.toISOString().split("T")[0]] = 0
+        }
+        activity.forEach((a) => {
+          const dateStr = new Date(a.createdAt!).toISOString().split("T")[0]
+          if (dailyCounts[dateStr] !== undefined) dailyCounts[dateStr]++
+        })
+
+        const data = Object.entries(dailyCounts).map(([date, pages]) => ({ date, pages }))
+        const average = data.length > 0
+          ? Math.round((data.reduce((s, d) => s + d.pages, 0) / data.length) * 10) / 10
+          : 0
+
+        return { chartType, title, data, showAverage, average }
+      },
+    }),
+
     getUserBooks: tool({
       description: "Get a list of all books/files in the user's library with their reading progress",
       parameters: z.object({}),
@@ -279,13 +322,15 @@ Available tools:
 - getBookProgress: Progress on a specific book
 - getLastReadBook: Most recently read book
 - getReadingActivity: Activity summary for a time period
-- getDailyReadingStats: Daily page counts for charts
+- getDailyReadingStats: Daily page counts (simple, no chart options)
+- createVisualization: Create a chart with full control — use this for ANY chart/graph/visualization request. Supports bar, line, and area charts. Always set showAverage=true when the user mentions an average or trend line.
 - getUserNotes: Sticky notes the user has created
 - getBookContent: Extract and read actual PDF text (for summaries and Q&A)
 
 Be conversational, specific, and helpful. Don't explain which tools you're using — just answer naturally.
-When users ask for charts or visualizations, use getDailyReadingStats and describe the data clearly.
-When asked for a book summary or to answer content questions, use getBookContent to read the actual text first.`
+When users ask for ANY chart, graph, plot, or visualization — always use createVisualization (not getDailyReadingStats). Pick the most appropriate chartType for their request.
+When asked for a book summary or to answer content questions, use getBookContent to read the actual text first.
+IMPORTANT: Never generate images, never output base64 data, never use markdown image syntax (![...](...)) — charts are rendered automatically by the UI from tool results.`
 
   const result = streamText({
     model: openai("gpt-4o-mini"),

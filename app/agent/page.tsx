@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react"
 import { useChat, type Message } from "@ai-sdk/react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import type { User, AgentChat } from "@/lib/types"
 import { LibraryHeader } from "@/components/library-header"
 import { Button } from "@/components/ui/button"
@@ -12,12 +12,6 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -34,14 +28,13 @@ import {
   StickyNote,
   Plus,
   MessageSquare,
-  MoreHorizontal,
   Pencil,
   Trash2,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { ReadingChart } from "@/components/reading-chart"
+import { ReadingChart, VisualizationChart, type VisualizationData } from "@/components/reading-chart"
 
 const SUGGESTED_PROMPTS = [
   { icon: BookOpen, text: "What was the last book I was reading?" },
@@ -56,12 +49,15 @@ export default function AgentPage() {
   const [chats, setChats] = useState<AgentChat[]>([])
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [hoveredChatId, setHoveredChatId] = useState<string | null>(null)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [chatToRename, setChatToRename] = useState<AgentChat | null>(null)
   const [newTitle, setNewTitle] = useState("")
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [isCreatingChat, setIsCreatingChat] = useState(false)
   const [isSavingMessages, setIsSavingMessages] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const scrollRef = useRef<HTMLDivElement>(null)
   const lastSavedMessageCount = useRef(0)
 
@@ -83,7 +79,17 @@ export default function AgentPage() {
       setUser(currentUser)
 
       const chatsRes = await fetch("/api/agent/chats")
-      if (chatsRes.ok) setChats(await chatsRes.json())
+      if (chatsRes.ok) {
+        const data = await chatsRes.json()
+        const loadedChats = Array.isArray(data) ? data : (data.chats ?? [])
+        setChats(loadedChats)
+
+        // Auto-load chat from ?chat= query param (e.g. from All Chats page)
+        const chatParam = searchParams.get("chat")
+        if (chatParam && loadedChats.find((c: { id: string }) => c.id === chatParam)) {
+          await loadChat(chatParam)
+        }
+      }
 
       setIsLoading(false)
     }
@@ -251,11 +257,15 @@ export default function AgentPage() {
     )
   }
 
+  const SIDEBAR_LIMIT = 12
+  const sidebarChats = chats.slice(0, SIDEBAR_LIMIT)
+  const hasMoreChats = chats.length > SIDEBAR_LIMIT
+
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       <LibraryHeader user={user} />
 
-      <div className="flex-1 pt-16 flex">
+      <div className="flex-1 pt-16 flex overflow-hidden">
         {/* Sidebar */}
         <div className={cn(
           "border-r border-border bg-card/50 flex flex-col transition-all duration-300 overflow-hidden",
@@ -280,43 +290,79 @@ export default function AgentPage() {
           {sidebarOpen && (
             <ScrollArea className="flex-1">
               <div className="p-2">
-                <p className="text-xs font-medium text-muted-foreground px-2 py-1">Chat History</p>
+                <p className="text-xs font-medium text-muted-foreground px-2 py-1">Recent Chats</p>
                 {chats.length === 0 ? (
                   <p className="text-sm text-muted-foreground px-2 py-4 text-center">No chats yet</p>
                 ) : (
-                  <div className="space-y-1">
-                    {chats.map((chat) => (
+                  <div className="space-y-0.5">
+                    {sidebarChats.map((chat) => {
+                      const showActions = hoveredChatId === chat.id || currentChatId === chat.id
+                      return (
                       <div
                         key={chat.id}
-                        className={cn(
-                          "group flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer hover:bg-accent/50 transition-colors",
-                          currentChatId === chat.id && "bg-accent"
-                        )}
-                        onClick={() => loadChat(chat.id)}
+                        className={cn(currentChatId === chat.id ? "bg-accent" : "hover:bg-accent/50")}
+                        style={{
+                          borderRadius: "8px",
+                          display: "grid",
+                          gridTemplateColumns: "1fr 26px 26px",
+                          gap: "3px",
+                          alignItems: "center",
+                          padding: "4px 6px",
+                        }}
+                        onMouseEnter={() => setHoveredChatId(chat.id)}
+                        onMouseLeave={() => setHoveredChatId(null)}
                       >
-                        <MessageSquare className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{chat.title || "New Chat"}</p>
-                          <p className="text-xs text-muted-foreground">{formatChatDate(chat.updatedAt)}</p>
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                              <MoreHorizontal className="w-4 h-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setChatToRename(chat); setNewTitle(chat.title || ""); setRenameDialogOpen(true) }}>
-                              <Pencil className="w-4 h-4 mr-2" />Rename
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); deleteChat(chat.id) }} className="text-destructive">
-                              <Trash2 className="w-4 h-4 mr-2" />Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        {/* Clickable title area */}
+                        <button
+                          style={{ display: "flex", alignItems: "center", gap: "7px", background: "none", border: "none", cursor: "pointer", textAlign: "left", overflow: "hidden", minWidth: 0, padding: "3px 0" }}
+                          onClick={() => loadChat(chat.id)}
+                        >
+                          <MessageSquare style={{ width: "14px", height: "14px", flexShrink: 0, opacity: 0.45 }} />
+                          <div style={{ overflow: "hidden", minWidth: 0 }}>
+                            <p style={{ fontSize: "13px", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: "1.3", margin: 0 }}>{chat.title || "New Chat"}</p>
+                            <p style={{ fontSize: "11px", opacity: 0.45, margin: 0 }}>{formatChatDate(chat.updatedAt)}</p>
+                          </div>
+                        </button>
+                        {/* Rename button */}
+                        <button
+                          title="Rename"
+                          style={{ width: "26px", height: "26px", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "5px", border: "1px solid #d1d5db", background: "#f3f4f6", cursor: "pointer", color: "#6b7280", flexShrink: 0, opacity: showActions ? 1 : 0, pointerEvents: showActions ? "auto" : "none", transition: "opacity 0.15s" }}
+                          onMouseEnter={(e) => { const el = e.currentTarget as HTMLButtonElement; el.style.background = "#e5e7eb"; el.style.color = "#111827" }}
+                          onMouseLeave={(e) => { const el = e.currentTarget as HTMLButtonElement; el.style.background = "#f3f4f6"; el.style.color = "#6b7280" }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setChatToRename(chat)
+                            setNewTitle(chat.title || "")
+                            setRenameDialogOpen(true)
+                          }}
+                        >
+                          <Pencil style={{ width: "12px", height: "12px" }} />
+                        </button>
+                        {/* Delete button */}
+                        <button
+                          title="Delete"
+                          style={{ width: "26px", height: "26px", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "5px", border: "1px solid #d1d5db", background: "#f3f4f6", cursor: "pointer", color: "#6b7280", flexShrink: 0, opacity: showActions ? 1 : 0, pointerEvents: showActions ? "auto" : "none", transition: "opacity 0.15s" }}
+                          onMouseEnter={(e) => { const el = e.currentTarget as HTMLButtonElement; el.style.background = "#fee2e2"; el.style.borderColor = "#fca5a5"; el.style.color = "#dc2626" }}
+                          onMouseLeave={(e) => { const el = e.currentTarget as HTMLButtonElement; el.style.background = "#f3f4f6"; el.style.borderColor = "#d1d5db"; el.style.color = "#6b7280" }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setDeleteConfirmId(chat.id)
+                          }}
+                        >
+                          <Trash2 style={{ width: "12px", height: "12px" }} />
+                        </button>
                       </div>
-                    ))}
+                    )})}
                   </div>
+                )}
+                {hasMoreChats && (
+                  <button
+                    onClick={() => router.push("/agent/chats")}
+                    className="w-full mt-1 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-lg transition-colors text-left flex items-center gap-2"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+                    View all {chats.length} chats
+                  </button>
                 )}
               </div>
             </ScrollArea>
@@ -324,7 +370,7 @@ export default function AgentPage() {
         </div>
 
         {/* Main Chat Area */}
-        <main className="flex-1 flex flex-col max-w-3xl mx-auto w-full px-4">
+        <main className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full px-4">
           {messages.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center py-12">
               <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mb-6">
@@ -355,14 +401,27 @@ export default function AgentPage() {
                     return content.trim().length > 0
                   })
                   .map((message) => {
+                    // createVisualization tool result (full chart config)
+                    const vizInvocation = message.toolInvocations?.find(
+                      (t) => t.state === "result" && t.toolName === "createVisualization"
+                    )
+                    const vizData: VisualizationData | null =
+                      vizInvocation && "result" in vizInvocation ? vizInvocation.result : null
+
+                    // getDailyReadingStats legacy result (simple data array)
                     const chartInvocation = message.toolInvocations?.find(
                       (t) => t.state === "result" && t.toolName === "getDailyReadingStats"
                     )
                     const chartData = chartInvocation && "result" in chartInvocation ? chartInvocation.result?.data : null
+
                     const content = typeof message.content === "string" ? message.content : ""
 
+                    const hasChart = vizData || chartData
+                    // Strip any base64 image markdown the model might hallucinate — they freeze the page
+                    const safeContent = content.replace(/!\[[^\]]*\]\(data:[^)]+\)/g, "").trim()
+
                     return (
-                      <div key={message.id} className={cn("flex gap-3", message.role === "user" && "flex-row-reverse")}>
+                      <div key={message.id} className={cn("flex gap-3 items-start", message.role === "user" && "flex-row-reverse")}>
                         {message.role === "assistant" ? (
                           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
                             <Sparkles className="w-4 h-4 text-primary-foreground" />
@@ -372,23 +431,34 @@ export default function AgentPage() {
                             <AvatarFallback className="bg-secondary text-sm">{initials}</AvatarFallback>
                           </Avatar>
                         )}
-                        <div className={cn(
-                          "max-w-[80%] rounded-2xl px-4 py-3",
-                          message.role === "user"
-                            ? "bg-primary text-primary-foreground rounded-tr-sm"
-                            : "bg-card border border-border rounded-tl-sm"
-                        )}>
-                          {chartData && (
-                            <div className="mb-3">
-                              <ReadingChart data={chartData as { date: string; pages: number }[]} />
+                        {/* Outer column — chart lives here (outside the bubble) so ResponsiveContainer gets a proper bounded width */}
+                        <div className={cn("flex flex-col gap-2 min-w-0", message.role === "user" ? "items-end" : "items-start")} style={{ maxWidth: "80%" }}>
+                          {hasChart && (
+                            <div className="w-full" style={{ width: "min(100%, 480px)" }}>
+                              {vizData
+                                ? <VisualizationChart {...vizData} />
+                                : <ReadingChart data={chartData as { date: string; pages: number }[]} />
+                              }
                             </div>
                           )}
-                          {message.role === "assistant" ? (
-                            <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                          {safeContent.length > 0 && (
+                            <div className={cn(
+                              "rounded-2xl px-4 py-3",
+                              message.role === "user"
+                                ? "bg-primary text-primary-foreground rounded-tr-sm"
+                                : "bg-card border border-border rounded-tl-sm"
+                            )}>
+                              {message.role === "assistant" ? (
+                                <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{ img: () => null }}
+                                  >{safeContent}</ReactMarkdown>
+                                </div>
+                              ) : (
+                                <div className="text-sm whitespace-pre-wrap">{content}</div>
+                              )}
                             </div>
-                          ) : (
-                            <div className="text-sm whitespace-pre-wrap">{content}</div>
                           )}
                         </div>
                       </div>
@@ -425,13 +495,40 @@ export default function AgentPage() {
         </main>
       </div>
 
-      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+      {/* Rename dialog */}
+      <Dialog open={renameDialogOpen} onOpenChange={(open) => { setRenameDialogOpen(open); if (!open) { setChatToRename(null); setNewTitle("") } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Rename Chat</DialogTitle></DialogHeader>
-          <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Enter new title..." onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRename() } }} />
+          <Input
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="Enter new title..."
+            autoFocus
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRename() } }}
+          />
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenameDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleRename} disabled={!newTitle.trim()}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Delete Chat?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">This conversation will be permanently deleted and cannot be recovered.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (deleteConfirmId) deleteChat(deleteConfirmId)
+                setDeleteConfirmId(null)
+              }}
+            >
+              Delete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

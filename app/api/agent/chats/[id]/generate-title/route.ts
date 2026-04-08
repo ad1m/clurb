@@ -27,11 +27,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const { text } = await generateText({
     model: openai("gpt-4o-mini"),
-    prompt: `Generate a very short title (3-5 words) for a reading assistant chat that starts with: "${firstUserMsg.content}"\n\nOnly output the title, no quotes or punctuation.`,
-    maxTokens: 20,
+    prompt: `Create a 2-3 word title for this reading assistant question: "${firstUserMsg.content}"\n\nRules: maximum 3 words, no punctuation, no quotes, title case. Output only the title.`,
+    maxTokens: 15,
   })
 
-  const title = text.trim().replace(/^["']|["']$/g, "").slice(0, 50)
+  const title = text.trim().replace(/^["']|["']$/g, "").replace(/[.!?]$/, "").slice(0, 40)
   db.update(agentChats).set({ title, updatedAt: new Date().toISOString() }).where(eq(agentChats.id, chatId)).run()
 
   const updated = db.select().from(agentChats).where(eq(agentChats.id, chatId)).get()
