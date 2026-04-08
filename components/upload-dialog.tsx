@@ -123,12 +123,12 @@ export function UploadDialog({ onUploadComplete }: UploadDialogProps) {
           <Plus className="w-5 h-5" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md overflow-hidden">
         <DialogHeader>
           <DialogTitle>Upload a Document</DialogTitle>
           <DialogDescription>Add a PDF or text file to your library.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 py-4 min-w-0">
           {!file ? (
             <div
               {...getRootProps()}
@@ -144,13 +144,13 @@ export function UploadDialog({ onUploadComplete }: UploadDialogProps) {
               <p className="text-xs text-muted-foreground">or click to browse (PDF, TXT — max 50MB)</p>
             </div>
           ) : (
-            <div className="flex items-center gap-3 p-3 bg-secondary rounded-xl">
+            <div className="flex items-center gap-3 p-3 bg-secondary rounded-xl min-w-0 w-full">
               <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
                 <FileText className="w-5 h-5 text-primary" />
               </div>
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 overflow-hidden">
                 <p className="text-sm font-medium truncate">{file.name}</p>
-                <p className="text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <p className="text-xs text-muted-foreground truncate">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => { setFile(null); setTitle("") }}>
                 <X className="w-4 h-4" />

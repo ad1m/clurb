@@ -30,41 +30,46 @@ export function FileCard({ file, currentPage, onUpdate }: FileCardProps) {
     hasStartedRef.current = true
     setIsGenerating(true)
 
-    const loadingTask = pdfjs.getDocument(file.fileUrl)
     let cancelled = false
+    let pdfTask: ReturnType<typeof pdfjs.getDocument> | null = null
 
-    loadingTask.promise
-      .then((pdf) => pdf.getPage(1))
-      .then((page) => {
-        if (cancelled) return
-        const viewport = page.getViewport({ scale: 0.5 })
-        const canvas = canvasRef.current
-        if (!canvas) return
-        const context = canvas.getContext("2d")
-        if (!context) return
-        canvas.height = viewport.height
-        canvas.width = viewport.width
-        return page.render({ canvas, canvasContext: context, viewport }).promise.then(() => {
-          if (cancelled) return
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.7)
-          setCoverUrl(dataUrl)
-          fetch(`/api/files/${file.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ coverImageUrl: dataUrl }),
-          }).catch(() => {})
-        })
-      })
-      .catch((error) => {
-        if (!cancelled) console.error("[file-card] cover gen failed:", error)
-      })
-      .finally(() => {
-        if (!cancelled) setIsGenerating(false)
-      })
+    const run = async () => {
+      // Fetch via browser fetch so auth cookies are sent correctly
+      const response = await fetch(file.fileUrl, { credentials: "include" })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.arrayBuffer()
+      if (cancelled) return
+      pdfTask = pdfjs.getDocument({ data })
+      const pdf = await pdfTask.promise
+      if (cancelled) return
+      const page = await pdf.getPage(1)
+      if (cancelled) return
+      const viewport = page.getViewport({ scale: 0.5 })
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const context = canvas.getContext("2d")
+      if (!context) return
+      canvas.height = viewport.height
+      canvas.width = viewport.width
+      await page.render({ canvas, canvasContext: context, viewport }).promise
+      if (cancelled) return
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.7)
+      setCoverUrl(dataUrl)
+      fetch(`/api/files/${file.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coverImageUrl: dataUrl }),
+      }).catch(() => {})
+    }
+
+    run()
+      .catch((error) => { if (!cancelled) console.error("[file-card] cover gen failed:", error) })
+      .finally(() => { setIsGenerating(false) })
 
     return () => {
       cancelled = true
-      loadingTask.destroy().catch(() => {})
+      hasStartedRef.current = false
+      pdfTask?.destroy().catch(() => {})
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
